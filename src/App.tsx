@@ -1,19 +1,21 @@
-import React, { useEffect, useState } from "react";
-import { NetworkTables, NetworkTablesTypeInfos } from "ntcore-ts-client";
-
-// const ntcore = NetworkTables.getInstanceByURI('127.0.0.1');
-
-// const elevatorTopic = ntcore.createTopic<number>('/exampleTable/Elevator Height', NetworkTablesTypeInfos.kDouble);
-
-// elevatorTopic.subscribe((value) => {
-//   console.log(`Got elevator height: ${value}`);
-// });
+import React, { SetStateAction, useEffect, useState } from "react";
+import { useEntry } from "@frc-web-components/react";
 
 const App: React.FC = () => {
-  return <div>
-    <h1>Hello Dashboard!</h1>
-  </div>
-  
+  const [eleHeight] = useEntry<number>("/AdvantageKit/RealOutputs/Elevator/Height Meters", 0);
+  const [autoCommand, setAutoCommand] = useEntry<string[]>("/CSPDashboard/AutoCommands", ["Src"]);
+
+  const addProcessor = () => {
+    setAutoCommand(autoCommand.concat(["Processor"]));
+  }
+
+  return (
+    <div>
+      <h1>Welcome to CSP Dashboard!</h1>
+      <div>Current Elevator Height: {eleHeight}</div>
+      <button onClick={addProcessor}>Add Processor {autoCommand.join(', ')}</button>
+    </div>
+  )
 };
 
 export default App;
