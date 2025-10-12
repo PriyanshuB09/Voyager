@@ -1,0 +1,481 @@
+body {
+    margin: 0;
+    background-color: #202020;
+    font-family: 'Segoe UI';
+}
+
+/* .titlebar {
+  height: 30px;
+  color: black;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  app-region: drag;
+  user-select: none;
+} */
+
+/* Base */
+* {
+    margin: 0px;
+    padding: 0px;
+
+}
+
+#titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 40px;
+  -webkit-app-region: drag;
+  font-family: "Segoe UI", sans-serif;
+  user-select: none;
+  justify-content: center;
+}
+
+/* Default (light) theme */
+body[data-theme="light"] #titlebar {
+  background-color: #f3f3f3;
+  color: #333;
+}
+
+body[data-theme="light"] .window-controls button {
+  color: #333;
+}
+
+body[data-theme="light"] .window-controls button:hover {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+body[data-theme="light"] .close:hover {
+  background: #e81123;
+  color: white;
+}
+
+/* Dark theme */
+body[data-theme="dark"] #titlebar {
+  background-color: #0D1821;
+  color: #ccc;
+}
+
+body[data-theme="dark"] .window-controls button {
+  color: #ccc;
+}
+
+body[data-theme="dark"] .window-controls button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+body[data-theme="dark"] .close:hover {
+  background: #c42b1c;
+  color: white;
+}
+
+/* Shared styling for layout, etc. */
+.navbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 12px;
+  font-size: 13px;
+  font-weight: 500;
+  
+}
+
+.logo {
+  width: 25px;
+  height: 25px;
+  opacity: 0.8;
+}
+
+.app-title {
+  color: inherit;
+}
+
+.window-controls {
+  display: flex;
+  -webkit-app-region: no-drag;
+  height: 100%;
+}
+
+.window-controls button {
+  width: 46px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+  transition: background 0.15s ease;
+  font-size: 12px;
+  line-height: 0;
+}
+
+.minimize::before {
+  content: "–";
+  font-size: 16px;
+  margin-top: -2px;
+}
+.maximize::before {
+  content: "□";
+  font-size: 11px;
+  margin-top: 1px;
+}
+.close::before {
+  content: "×";
+  font-size: 14px;
+  font-weight: 400;
+}
+
+
+.nav-icon {
+  background-color: #0D1821;
+  position: absolute;
+  top: 40px;
+  left: 0px;
+  width: 40px;
+  height: 40px;
+  color: #F0F4EF;
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: center;
+  align-items: center;
+  font-weight: bold;
+  font-size: 20px;
+  user-select: none;
+}
+
+.top-bar {
+  width: 100%;
+  border-bottom-left-radius: 10px;
+  border-bottom-right-radius: 10px;
+  margin-left: auto;
+  margin-right: auto;
+  background-color: #0D1821;
+  color: white;
+  display: flex;
+  padding: 10px;
+  height: 60px;
+  margin-bottom: 10px;
+  box-sizing: border-box;
+  justify-content: space-evenly;
+}
+
+.side-bar {
+  position: absolute;
+  display: flex;
+  top: 80px;
+  left: 0px;
+  height: 400px;
+  width: 150px;
+  background-color: #023e8a;
+  color: white;
+  font-family: 'Segoe UI';
+  transition-duration: 0.4s;
+  overflow: hidden;
+  border-radius: 10px;
+  padding: 10px;
+  box-sizing: border-box;
+  flex-direction: column;
+  justify-content: space-evenly;
+  align-items: center;
+  z-index: 999;
+}
+
+.side-bar-component {
+  width: 90%;
+  height: 100px;
+  padding: 5px;
+  text-align: center;
+  align-content: center;
+  box-sizing: border-box;
+  border-bottom: 2px solid #F0F4EF;
+}
+
+.side-bar-component:last-of-type {
+  border: none;
+}
+
+.tab-container {
+  width: 80%;
+  height: calc(100vh - 150px);
+  display: flex;
+  background-color: #B4CDED;
+  margin-right: auto;
+  margin-left: auto;
+  padding: 15px;
+  border-radius: 10px;
+  box-sizing: border-box;
+  overflow: hidden;
+  position: relative;
+}
+
+.full-state {
+  position: absolute;
+  width: 30%;
+  /* top: 0px;
+  left: 5%; */
+  height: 40px;
+}
+
+.state-back {
+  display: flex;
+  flex-wrap: nowrap;
+  flex-direction: row;
+  box-sizing: border-box;
+  padding: 5px;
+  align-items: center;
+  justify-content: space-evenly;
+}
+
+.state-back > div {
+  color: white;
+  width: 40%;
+  height: 30px;
+  text-align: center;
+  align-content: center;
+}
+
+.state-indicator {
+  background-color: rgb(105, 251, 105);
+  position: absolute;
+  top: 0px;
+  left: 0px;
+  width: 50%;
+  height: 40px;
+  opacity: 0.5;
+  transition-duration: 0.3s;
+}
+
+.field-image {
+  transform: rotateZ(90deg);
+  width: 1300px;
+  opacity: 1;
+}
+
+.image-div {
+  position: absolute;
+  bottom: -150px;
+  right: -5%;
+  overflow: hidden;
+  width: calc(1927px / 2);
+  height: 1000px;
+}
+
+.auton-location {
+  position: absolute;
+  background-color: white;
+  width: 25px;
+  height: 25px;
+  display: flex;
+  text-align: center;
+  align-content: center;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.current-auton {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background-color: #4361ee;
+  width: 430px;
+  height: 580px;
+  border-radius: 15px;
+  box-sizing: border-box;
+  padding: 15px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.current-auton:hover {
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+:root {
+  --bg: #0f1720;
+  --card: #0b1220;
+  --accent: #1e90ff;
+  --muted: #9aa6b2;
+}
+
+html, body {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  font-family: "Inter", sans-serif;
+  color: var(--muted);
+}
+
+#root {
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.app {
+  width: 340px; /* narrower app */
+  height: calc(0.96 * 550px);
+  margin: 20px auto; /* reduced margin */
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border-radius: 12px;
+  box-shadow: 0 0 14px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* Fixed Add button header */
+.controls {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 12px;
+  background: rgba(15, 25, 40, 0.9);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(6px);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+/* Add button */
+.add-btn {
+  background: var(--accent);
+  color: white;
+  font-weight: 600;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 6px rgba(30, 144, 255, 0.25);
+}
+
+.add-btn:hover {
+  background: #2b9eff;
+  box-shadow: 0 3px 8px rgba(30, 144, 255, 0.35);
+  transform: translateY(-1px);
+}
+
+/* Scrollable list */
+.list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  list-style: none;
+}
+
+/* Clean, subtle scrollbar */
+.list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+}
+
+.list::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* Item styling */
+.item {
+  display: flex;
+  align-items: center; /* centers the icon vertically with text */
+  justify-content: space-between; /* keeps icon on the right */
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  padding: 10px 14px;
+  width: 85%;
+  margin: 0 auto;
+  cursor: grab;
+  color: #fff;
+  user-select: none;
+  transition: all 0.2s ease;
+}
+
+.item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  transform: scale(1.02);
+}
+
+.item:active {
+  cursor: grabbing;
+  transform: scale(0.98);
+}
+
+.item.selected {
+  border-color: var(--accent);
+  background: rgba(30, 144, 255, 0.15);
+  box-shadow: 0 0 10px rgba(30, 144, 255, 0.25);
+}
+
+.list-item {
+  display: flex;
+  align-items: center; /* ensures vertical alignment of handle, content, meta */
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--card);
+  border: 1px solid #222;
+  border-radius: 6px;
+  color: #fff;
+  cursor: grab;
+  user-select: none;
+  transition: background 0.2s ease, transform 0.1s ease;
+}
+
+.list-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.handle {
+  font-size: 18px;
+  margin-right: 8px;
+  cursor: grab;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.content {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  font-size: 15px;
+  color: #fff;
+}
+
+.meta {
+  font-size: 13px;
+  color: var(--muted);
+  margin-left: 8px;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.auton-clear {
+  background-color: white;
+  color: black;
+  position: absolute;
+  top: 0px;
+  left: 0px;
+  z-index: 500;
+}
