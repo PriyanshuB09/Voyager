@@ -20,7 +20,7 @@ function createWindow() {
     webPreferences: {
       preload: path.join(path.dirname(fileURLToPath(import.meta.url)), "../electron/preload.js"),
     },
-    titleBarStyle: 'hidden',
+    // titleBarStyle: 'hidden',
     // frame: false,
     backgroundColor: '#000000',
     accentColor: '#000000',
@@ -32,7 +32,7 @@ function createWindow() {
 
   const startUrl =
     process.env.NODE_ENV === "development"
-      ? "http://localhost:5173"
+      ? "http://localhost:5174"
       : `file://${path.join(path.dirname(fileURLToPath(import.meta.url)), "../dist/index.html")}`;
   win.loadURL(startUrl);
 }

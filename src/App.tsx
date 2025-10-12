@@ -30,39 +30,67 @@ const App: React.FC = () => {
   const draggingRef = useRef<DragInfo | null>(null);
   const placeholderIndexRef = useRef<number | null>(null);
   const [counter, setCounter] = useState(items.length + 1);
+  const lastClickedIndexRef = useRef<number | null>(null);
+  const [deleteMode, setDeleteMode] = useState(false);
+
 
   const [autoCommands, setAutoCommands] = useEntry<string[]>('/CSPDashboard/AutoCommands', []);
 
   useEffect(() => {
     setAutoCommands(selectionOrder);
+    console.log('AutoCommands set to:', selectionOrder);
   }, [selectionOrder])
 
-  const handleAddItem = (id:string, text:string) => {
-    const newItem: Item = {
-      id,
-      text
-    };
+  useEffect(() => {
+    setSelectionOrder(items.map((it) => it.text));
+  }, [items]);
 
-    let insertIndex = items.length; // default at end
-    if (selectionOrder.length > 0) {
-      const lastSelectedId = selectionOrder[selectionOrder.length - 1];
-      const lastIndex = items.findIndex((i) => i.id === lastSelectedId);
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Delete" || e.key === "Backspace") setDeleteMode(true);
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "Delete" || e.key === "Backspace") setDeleteMode(false);
+    };
+  
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+  
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, []);
+  
+
+  const handleAddItem = (id: string, text: string) => {
+    const newItem: Item = { id, text };
+  
+    // Try to insert after the last selected item (by id), otherwise append
+    let insertIndex = items.length;
+    if (selected.size > 0) {
+      const lastSelectedId = Array.from(selected).pop()!;
+      const lastIndex = items.findIndex(i => i.id === lastSelectedId);
       if (lastIndex !== -1) insertIndex = lastIndex + 1;
     }
-
+  
     const newItems = [
       ...items.slice(0, insertIndex),
       newItem,
       ...items.slice(insertIndex),
     ];
-
+  
     setItems(newItems);
+    setSelectionOrder(newItems.map(it => it.text)); // ✅ keep texts synced
     setCounter(counter + 1);
   };
-
+  
+  
+  
   const handleClear = () => {
     setItems([]);
     setSelected(new Set());
+    setSelectionOrder([]); // ✅ clear texts too
   };
 
   // handleAddItem('19343' + counter, 'New Command');
@@ -73,49 +101,70 @@ const App: React.FC = () => {
     else setSelectionOrder(Array.from(newSet));
   };
 
-  // Handle item selection
-  const handleSelect = (e: MouseEvent<HTMLLIElement>, index: number) => {
-  const id = items[index].id;
-
-  // SHIFT-click: range select
-  if (e.shiftKey && selected.size > 0) {
-    const ids = Array.from(selected);
-    const lastId = ids[ids.length - 1];
-    const lastIndex = items.findIndex((it) => it.id === lastId);
-    const [start, end] = [lastIndex, index].sort((a, b) => a - b);
-    const newSet = new Set(selected);
-    const newOrder = [...selectionOrder];
-    for (let i = start; i <= end; i++) {
-      if (!newSet.has(items[i].id)) {
-        newSet.add(items[i].id);
-        newOrder.push(items[i].id);
+  const handleSelect = (e: React.MouseEvent<HTMLLIElement>, index: number) => {
+    const id = items[index].id;
+    const text = items[index].text;
+  
+    // 🗑️ If in delete mode, delete instead of selecting
+    if (deleteMode) {
+      e.preventDefault();
+      const newItems = items.filter((_, i) => i !== index);
+      setItems(newItems);
+      setSelectionOrder(newItems.map(it => it.text));
+      setSelected((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(id);
+        return newSet;
+      });
+      return;
+    }
+  
+    // 🧩 otherwise proceed with your normal selection logic...
+    if (!e.shiftKey) {
+      lastClickedIndexRef.current = index;
+    }
+  
+    if (e.shiftKey && lastClickedIndexRef.current !== null) {
+      const start = Math.min(lastClickedIndexRef.current, index);
+      const end = Math.max(lastClickedIndexRef.current, index);
+  
+      const rangeIds = items.slice(start, end + 1).map(it => it.id);
+      const newSet = new Set(selected);
+      const newOrder = [...selectionOrder];
+  
+      for (const rid of rangeIds) {
+        if (!newSet.has(rid)) {
+          newSet.add(rid);
+          newOrder.push(items.find(it => it.id === rid)!.text);
+        }
       }
+  
+      updateSelection(newSet, newOrder);
+      return;
     }
-    updateSelection(newSet, newOrder);
-    return;
-  }
-
-  // CTRL/CMD-click: toggle
-  if (e.metaKey || e.ctrlKey) {
-    const newSet = new Set(selected);
-    const newOrder = [...selectionOrder];
-    if (newSet.has(id)) {
-      newSet.delete(id);
-      // remove from order list
-      updateSelection(
-        newSet,
-        newOrder.filter((x) => x !== id)
-      );
-    } else {
-      newSet.add(id);
-      updateSelection(newSet, [...newOrder, id]);
+  
+    if (e.ctrlKey || e.metaKey) {
+      const newSet = new Set(selected);
+      const newOrder = [...selectionOrder];
+  
+      if (newSet.has(id)) {
+        newSet.delete(id);
+        const idx = newOrder.indexOf(text);
+        if (idx !== -1) newOrder.splice(idx, 1);
+      } else {
+        newSet.add(id);
+        newOrder.push(text);
+      }
+  
+      updateSelection(newSet, newOrder);
+      return;
     }
-    return;
-  }
-
-  // Single select
-  updateSelection(new Set([id]), [id]);
-};
+  
+    updateSelection(new Set([id]), [text]);
+  };
+  
+  
+  
 
   // Drag start
   const onDragStart = (e: DragEvent<HTMLLIElement>, index: number) => {
@@ -165,25 +214,23 @@ const App: React.FC = () => {
     const drag = draggingRef.current;
     if (!drag) return;
     let insertIndex = placeholderIndexRef.current ?? items.length;
-
-    // Remove dragged items
+  
     const remaining = items.filter((it) => !drag.selectedIds.includes(it.id));
-
-    // Insert dragged items
-    const draggedItems = drag.selectedIds.map(
-      (id) => items.find((it) => it.id === id)!
-    );
+    const draggedItems = drag.selectedIds.map((id) => items.find((it) => it.id === id)!);
     const newItems = [
       ...remaining.slice(0, insertIndex),
       ...draggedItems,
       ...remaining.slice(insertIndex),
     ];
-
+  
     setItems(newItems);
     setSelected(new Set(drag.selectedIds));
+    setSelectionOrder(newItems.map((it) => it.text)); // ✅ now text-based
     draggingRef.current = null;
     placeholderIndexRef.current = null;
   };
+  
+  
 
   const onDragEnd = () => {
     draggingRef.current = null;
@@ -263,7 +310,8 @@ const App: React.FC = () => {
         <div className="auton-location" style={{right: "525px", bottom: "475px", transform: 'rotateZ(0deg)'}} onClick={() => handleAddItem(`${Math.floor(Math.random() * 100000)}-${counter}`, 'Push Left')}>PL</div>
         <div className="auton-location" style={{right: "525px", bottom: "425px", transform: 'rotateZ(0deg)'}} onClick={() => handleAddItem(`${Math.floor(Math.random() * 100000)}-${counter}`, 'Push Right')}>PR</div>
 
-        <div className="auton-clear" onClick={handleClear}>Clear</div>
+        {/* <div className="auton-clear" onClick={handleClear}>Clear</div> */}
+        {/* <div className="auton-submit" onClick={()=>setAutoCommands([...items].map(el => el.text))}>Submit</div> */}
 
         <div className="current-auton">
             <div className="app">
@@ -283,7 +331,7 @@ const App: React.FC = () => {
                         draggable
                         className={`list-item ${
                           selected.has(item.id) ? "selected" : ""
-                        }`}
+                        } ${deleteMode ? "delete-mode" : ""}`}
                         onClick={(e) => handleSelect(e, idx)}
                         onDragStart={(e) => onDragStart(e, idx)}
                         onDragOver={(e) => onDragOver(e, idx)}
