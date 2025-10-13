@@ -498,6 +498,6 @@ html, body {
 
 .tab-container-none {
   width: 100%;
-  height: calc(100vh - 110px);
-  background-color: red;
+  height: calc(calc(100vh - 110px) - 200px);
+  background-color: black;
 }

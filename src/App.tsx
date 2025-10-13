@@ -20,6 +20,34 @@ interface DragInfo {
   sourceIndex: number;
 }
 
+interface Pose2d {
+  x: number;        // meters
+  y: number;        // meters
+  rotation: number; // radians
+}
+
+function parseAdvantageKitPose2d(data: Uint8Array): Pose2d {
+  if (!(data instanceof Uint8Array)) {
+    console.warn("parseAdvantageKitPose2d: Expected Uint8Array input.");
+    return {x: 0, y: 0, rotation: 0};
+  }
+
+  if (data.byteLength < 24) {
+    console.warn(
+      `parseAdvantageKitPose2d: Invalid length (${data.byteLength}). Expected 24 bytes.`
+    );
+    return {x: 0, y: 0, rotation: 0};
+  }
+
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+
+  const x = view.getFloat64(0, true);   // little-endian
+  const y = view.getFloat64(8, true);
+  const rotation = view.getFloat64(16, true);
+
+  return { x, y, rotation };
+}
+
 const initialItems: Item[] = Array.from({ length: 0 }).map((_, i) => ({
   id: `item-${i + 1}`,
   text: `Item ${i + 1}`,
@@ -41,6 +69,8 @@ const App: React.FC = () => {
 
 
   const [autoCommands, setAutoCommands] = useEntry<string[]>('/CSPDashboard/AutoCommands', []);
+
+  const [poseStruct, setPoseStruct] = useEntry<Uint8Array>('/AdvantageKit/RealOutputs/Odometry/Robot', new Uint8Array([...new Array(24).fill(0)]));
 
   useEffect(() => {
     setAutoCommands(selectionOrder);
@@ -357,8 +387,8 @@ const App: React.FC = () => {
             </div>
         </div>
       </div>
-      <div className="tab-container-none" style={(currentTab=='none') ? {display: 'flex', position: 'relative'} : {display: 'none'}}>
-          <CSPField robotPose={[0, 0]}/>
+      <div className="tab-container-none" style={(currentTab=='none') ? {display: 'flex', position: 'relative'} : {display: 'none'}} onClick={() => console.log(poseStruct, parseAdvantageKitPose2d(poseStruct))}>
+          <CSPField robotPose={parseAdvantageKitPose2d(poseStruct)} robotDimensions={{length: 0.762, width: 0.736}} downScale={0.5}/>
       </div>
     </div>
   )

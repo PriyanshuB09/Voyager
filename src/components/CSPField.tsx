@@ -2,8 +2,8 @@ import React, {useEffect, useState, useRef} from 'react';
 import { useEntry } from '@frc-web-components/react';
 
 const reefscapeImageDimensions = {
-    length: 2924,
-    width: 1348
+    length: 800,
+    width: 369
 }
 
 const reefscapeFieldDimensionsInMeters = {
@@ -11,7 +11,15 @@ const reefscapeFieldDimensionsInMeters = {
     width: 8.13
 }
 
-const CSPField: React.FC<{robotPose: number[], robotDimensions?: {length: number, width: number}}> = ({robotPose, robotDimensions}) => {
+
+interface Pose2d {
+    x: number;        // meters
+    y: number;        // meters
+    rotation: number; // radians
+}
+
+
+const CSPField: React.FC<{robotPose: Pose2d, robotDimensions: {length: number, width: number}, downScale?: number}> = ({robotPose, robotDimensions={length: 0.5, width: 0.5}, downScale=1}) => {
 
     let correctedPose = {
         length: reefscapeImageDimensions.length / reefscapeFieldDimensionsInMeters.length,
@@ -20,8 +28,23 @@ const CSPField: React.FC<{robotPose: number[], robotDimensions?: {length: number
 
     return (
         <div style={{position: 'relative'}}>
-            <img src="../../../assets/images/reefscape-field-crop.png" style={{width: '50vw'}}/>
-            <div style={{width: 25, height: 25, rotate: '20deg', backgroundColor: 'black', position: 'absolute', top: correctedPose.width * robotPose[0] , left: correctedPose.length * robotPose[1]}}></div>
+            <img src="../../../assets/images/reefscape-field-crop.png" style={{width: `${reefscapeImageDimensions.length * downScale}px`, transform: 'scaleX(-1)'}}/>
+            <div style={{fontSize: 25 * downScale, 
+                display: 'flex', 
+                justifyContent: 'center', 
+                alignItems: 'center', 
+                textAlign: 'center', 
+                alignContent: 'center', 
+                boxSizing: 'border-box', 
+                padding: 'auto', 
+                color: 'white', 
+                width: robotDimensions.length * correctedPose.length * downScale, 
+                height: robotDimensions.width * correctedPose.width * downScale, 
+                rotate: `${robotPose.rotation * 180 / Math.PI + 180}deg`, 
+                backgroundColor: 'black', position: 'absolute', 
+                top: correctedPose.width * robotPose.y * downScale, 
+                left: (800 - correctedPose.length * robotPose.x) * downScale
+                }}>▶</div>
         </div>
     );
 }
