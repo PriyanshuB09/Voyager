@@ -495,3 +495,9 @@ html, body {
   left: 100px;
   z-index: 500;
 }
+
+.tab-container-none {
+  width: 100%;
+  height: calc(100vh - 110px);
+  background-color: red;
+}

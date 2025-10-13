@@ -1,7 +1,13 @@
 import React, { SetStateAction, useEffect, useState, useRef, DragEvent, MouseEvent } from "react";
-import { useEntry } from "@frc-web-components/react";
+import { Field3d, Field3dObject, Field3dPoseVisualizer, useEntry } from "@frc-web-components/react";
+import { Field, FieldPath, FieldRobot } from "@frc-web-components/react";
+import "@frc-web-components/fwc/components/field3d";
+
+// or to import all components:
+import "@frc-web-components/fwc/components";
 import './styles/global.css';
 import { interpretFMSControlData as interpretControlData } from "./FMSInterpreter";
+import CSPField from "./components/CSPField";
 
 interface Item {
   id: string;
@@ -20,7 +26,7 @@ const initialItems: Item[] = Array.from({ length: 0 }).map((_, i) => ({
 }));
 
 const App: React.FC = () => {
-  const [currentTab, setCurrentTab] = useState<string>('home');
+  const [currentTab, setCurrentTab] = useState<string>('none');
   const [sideBarOpen, setSideBarOpen] = useState<boolean>(false);
   const [blink, setBlink] = useState<boolean>(false);
   
@@ -281,7 +287,7 @@ const App: React.FC = () => {
 
       {/* SideBar */}
       <div className="side-bar" style={(sideBarOpen) ? {height: '400px', padding: '10px', color: 'white'} : {height: '0px', padding: '0px', color: '#023e8a'}}>
-        <div className="side-bar-component" style={{borderColor: sideBarOpen?'white':'#023e8a'}} onClick={() => setCurrentTab(currentTab=='auton'?'home':'auton')}>Auton Chooser</div>
+        <div className="side-bar-component" style={{borderColor: sideBarOpen?'white':'#023e8a'}} onClick={() => setCurrentTab(currentTab=='auton'?'none':'auton')}>Auton Chooser</div>
         <div className="side-bar-component" style={{borderColor: sideBarOpen?'white':'#023e8a'}}>Custom Tab</div>
         <div className="side-bar-component" style={{borderColor: sideBarOpen?'white':'#023e8a'}}>Embedded DataTable</div>
       </div>
@@ -350,6 +356,9 @@ const App: React.FC = () => {
               </ul>
             </div>
         </div>
+      </div>
+      <div className="tab-container-none" style={(currentTab=='none') ? {display: 'flex', position: 'relative'} : {display: 'none'}}>
+          <CSPField robotPose={[0, 0]}/>
       </div>
     </div>
   )
