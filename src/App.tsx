@@ -8,6 +8,16 @@ import "@frc-web-components/fwc/components";
 import './styles/global.css';
 import { interpretFMSControlData as interpretControlData } from "./FMSInterpreter";
 import CSPField from "./components/CSPField";
+import { Fullscreen } from "lucide-react";
+
+class WristConstants {
+  public static START_ANGLE = 180;
+  public static DOWN_ANGLE = 90;
+}
+
+class ElevatorConstants {
+  public static metersToPixels = 1;
+}
 
 interface Item {
   id: string;
@@ -65,12 +75,32 @@ const App: React.FC = () => {
   const placeholderIndexRef = useRef<number | null>(null);
   const [counter, setCounter] = useState(items.length + 1);
   const lastClickedIndexRef = useRef<number | null>(null);
-  const [deleteMode, setDeleteMode] = useState(false);
+  const [deleteMode, setDeleteMode] = useState<boolean>(false);
+
+  const defaultBanner = '#0d1821';
+  const [bannerStatus, setBannerStatus] = useState<{color: string, blink: boolean}>({color: defaultBanner, blink: false});
 
 
   const [autoCommands, setAutoCommands] = useEntry<string[]>('/CSPDashboard/AutoCommands', []);
-
   const [poseStruct, setPoseStruct] = useEntry<Uint8Array>('/AdvantageKit/RealOutputs/Odometry/Robot', new Uint8Array([...new Array(24).fill(0)]));
+  const [fullIntaked, setFullIntaked] = useEntry<boolean>('SETKEYLATER', false);
+  const [intakeVolts, setIntakeVolts] = useEntry<number>('SETKEYLATER', 0.0);
+
+
+  useEffect(() => {
+    if (intakeVolts > 0.0) setBannerStatus({...bannerStatus, blink: true});
+    else setBannerStatus({...bannerStatus, blink: false});
+
+    if (fullIntaked) setBannerStatus({...bannerStatus, color: '#00ff00'});
+    else setBannerStatus({...bannerStatus, color: '#ff5c00'});
+
+    // if (!(intakeVolts > 0.0) && !fullIntaked) setBannerStatus({color: '#0d1821', blink: false});
+
+    // setBannerStatus({color: '#ff5c00', blink: true});
+    console.log(bannerStatus);
+
+    document.documentElement.style.setProperty('--blink-color', bannerStatus.color);
+  }, [intakeVolts, fullIntaked]);
 
   useEffect(() => {
     setAutoCommands(selectionOrder);
@@ -276,12 +306,6 @@ const App: React.FC = () => {
 
   const placeholderIndex = placeholderIndexRef.current;
 
-  useEffect(() => {
-    setInterval(() => {
-      setBlink(!blink);
-    }, 750);
-  }, []);
-
   // NetworkTables Entries
 
   const [fmsControlData] = useEntry<number>('/FMSInfo/FMSControlData', 0);
@@ -302,7 +326,7 @@ const App: React.FC = () => {
           <div>Disabled</div>
         </div>
       </div>
-      <div id="titlebar" className={`titlebar`}>
+      <div id={'titlebar'}>
         <div className="navbar">
             <img src="../../assets/icons/icon.png" alt="App Logo" className="logo" />
             <span className="app-title">CSP Dashboard</span>
@@ -310,7 +334,7 @@ const App: React.FC = () => {
         </div>
 
       {/* Fill Later */}
-      <div className="top-bar">
+      <div  className={(bannerStatus.blink)?'top-bar blink':'top-bar no-blink'}>
         
       </div>
       <div className="nav-icon" onClick={() => setSideBarOpen(!sideBarOpen)}>☰</div>
@@ -389,6 +413,7 @@ const App: React.FC = () => {
       </div>
       <div className="tab-container-none" style={(currentTab=='none') ? {display: 'flex', position: 'relative'} : {display: 'none'}} onClick={() => console.log(poseStruct, parseAdvantageKitPose2d(poseStruct))}>
           <CSPField robotPose={parseAdvantageKitPose2d(poseStruct)} robotDimensions={{length: 0.762, width: 0.736}} downScale={0.5}/>
+          {/* <ReactP5Wrapper sketch={sketch} eleheight={100} />; */}
       </div>
     </div>
   )
