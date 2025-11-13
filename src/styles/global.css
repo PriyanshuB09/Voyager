@@ -4,6 +4,17 @@ body {
     font-family: 'Segoe UI';
 }
 
+:root {
+  --bg: #0f1720;
+  --card: #0b1220;
+  --accent: #1e90ff;
+  --muted: #9aa6b2;
+  --blink-time: 0.4s;
+  --blink-color: '#000000';
+  --default-color: '#0D1821';
+}
+
+
 /* .titlebar {
   height: 30px;
   color: black;
@@ -25,51 +36,15 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 40px;
+  height: 39px;
   -webkit-app-region: drag;
   font-family: "Segoe UI", sans-serif;
   user-select: none;
   justify-content: center;
+  color: #ccc;
 }
 
 /* Default (light) theme */
-body[data-theme="light"] #titlebar {
-  background-color: #f3f3f3;
-  color: #333;
-}
-
-body[data-theme="light"] .window-controls button {
-  color: #333;
-}
-
-body[data-theme="light"] .window-controls button:hover {
-  background: rgba(0, 0, 0, 0.1);
-}
-
-body[data-theme="light"] .close:hover {
-  background: #e81123;
-  color: white;
-}
-
-/* Dark theme */
-body[data-theme="dark"] #titlebar {
-  background-color: #0D1821;
-  color: #ccc;
-}
-
-body[data-theme="dark"] .window-controls button {
-  color: #ccc;
-}
-
-body[data-theme="dark"] .window-controls button:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: white;
-}
-
-body[data-theme="dark"] .close:hover {
-  background: #c42b1c;
-  color: white;
-}
 
 /* Shared styling for layout, etc. */
 .navbar {
@@ -91,43 +66,6 @@ body[data-theme="dark"] .close:hover {
 .app-title {
   color: inherit;
 }
-
-.window-controls {
-  display: flex;
-  -webkit-app-region: no-drag;
-  height: 100%;
-}
-
-.window-controls button {
-  width: 46px;
-  height: 100%;
-  border: none;
-  background: transparent;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: default;
-  transition: background 0.15s ease;
-  font-size: 12px;
-  line-height: 0;
-}
-
-.minimize::before {
-  content: "–";
-  font-size: 16px;
-  margin-top: -2px;
-}
-.maximize::before {
-  content: "□";
-  font-size: 11px;
-  margin-top: 1px;
-}
-.close::before {
-  content: "×";
-  font-size: 14px;
-  font-weight: 400;
-}
-
 
 .nav-icon {
   background-color: #0D1821;
@@ -152,7 +90,7 @@ body[data-theme="dark"] .close:hover {
   border-bottom-right-radius: 10px;
   margin-left: auto;
   margin-right: auto;
-  background-color: #0D1821;
+  /* background-color: #0D1821; */
   color: white;
   display: flex;
   padding: 10px;
@@ -293,13 +231,6 @@ body[data-theme="dark"] .close:hover {
   cursor: grab;
   user-select: none;
   -webkit-user-select: none;
-}
-
-:root {
-  --bg: #0f1720;
-  --card: #0b1220;
-  --accent: #1e90ff;
-  --muted: #9aa6b2;
 }
 
 html, body {
@@ -500,4 +431,50 @@ html, body {
   width: 100%;
   height: calc(calc(100vh - 110px) - 200px);
   background-color: black;
+}
+
+.blink {
+  animation: var(--blink-time) blinker linear infinite;
+  -webkit-animation: var(--blink-time) blinker linear infinite;
+  -moz-animation: var(--blink-time) blinker linear infinite;
+}
+
+.no-blink {
+  background-color: var(--blink-color);
+}
+
+@-moz-keyframes blinker {
+  0% {
+    background-color: var(--blink-color);
+  }
+  50% {
+    background-color: var(--default-color);
+  }
+  100% {
+    background-color: var(--blink-color);
+  }
+}
+
+@-webkit-keyframes blinker {
+  0% {
+    background-color: var(--blink-color);
+  }
+  50% {
+    background-color: var(--default-color);
+  }
+  100% {
+    background-color: var(--blink-color);
+  }
+}
+
+@keyframes blinker {
+  0% {
+    background-color: var(--blink-color);
+  }
+  50% {
+    background-color: var(--default-color);
+  }
+  100% {
+    background-color: var(--blink-color);
+  }
 }
