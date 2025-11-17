@@ -1,4 +1,4 @@
-import { app, BrowserWindow, nativeImage, nativeTheme } from 'electron';
+import { app, BrowserWindow, nativeImage, nativeTheme, ipcMain } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -6,17 +6,17 @@ function createWindow() {
   let iconPath;
 
   if (process.platform === 'win32') {
-    iconPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/icons/icon.ico');
+    iconPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../assets/icons/icon2.ico');
   } else if (process.platform === 'darwin') { // macOS
-    iconPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/icons/icon.icns');
+    iconPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../assets/icons/icon.icns');
   } else { // Linux
-    iconPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/icons/icon.png');
+    iconPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../assets/icons/icon.png');
   }
 
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
-    icon: path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/icons/icon.ico'),
+    icon: path.join(path.dirname(fileURLToPath(import.meta.url)), '../assets/icons/icon2.ico'),
     webPreferences: {
       preload: path.join(path.dirname(fileURLToPath(import.meta.url)), "../electron/preload.js"),
     },

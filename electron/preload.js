@@ -1,9 +1,8 @@
-"use strict";
-const { contextBridge, ipcRenderer } = require("electron");
+var _a = require("electron"), contextBridge = _a.contextBridge, ipcRenderer = _a.ipcRenderer;
 contextBridge.exposeInMainWorld("electronAPI", {
     windowControl: {
-        minimize: () => ipcRenderer.send("window-minimize"),
-        maximize: () => ipcRenderer.send("window-maximize"),
-        close: () => ipcRenderer.send("window-close"),
+        minimize: function () { return ipcRenderer.send("window-minimize"); },
+        maximize: function () { return ipcRenderer.send("window-maximize"); },
+        close: function () { return ipcRenderer.send("window-close"); }
     },
 });
