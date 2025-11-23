@@ -9,6 +9,7 @@ import './styles/global.css';
 import { interpretFMSControlData as interpretControlData } from "./FMSInterpreter";
 import CSPField from "./components/CSPField";
 import { Fullscreen } from "lucide-react";
+import CSPBoolean from "./components/CSPBoolean";
 
 class WristConstants {
   public static START_ANGLE = 180;
@@ -85,6 +86,8 @@ const App: React.FC = () => {
   const [poseStruct, setPoseStruct] = useEntry<Uint8Array>('/AdvantageKit/RealOutputs/Odometry/Robot', new Uint8Array([...new Array(24).fill(0)]));
   const [fullIntaked, setFullIntaked] = useEntry<boolean>('SETKEYLATER', false);
   const [intakeVolts, setIntakeVolts] = useEntry<number>('SETKEYLATER', 0.0);
+
+  const [atAngle, setAtAngle] = useEntry<boolean>('SETKEYLATER', false);
 
 
   useEffect(() => {
@@ -414,6 +417,7 @@ const App: React.FC = () => {
       <div className="tab-container-none" style={(currentTab=='none') ? {display: 'flex', position: 'relative'} : {display: 'none'}} onClick={() => console.log(poseStruct, parseAdvantageKitPose2d(poseStruct))}>
           <CSPField robotPose={parseAdvantageKitPose2d(poseStruct)} robotDimensions={{length: 0.762, width: 0.736}} downScale={0.5}/>
           {/* <ReactP5Wrapper sketch={sketch} eleheight={100} />; */}
+          <CSPBoolean value_key={"At Goal?"} state={false} styling={{position: 'absolute', top: 0, right: 15}}/>
       </div>
     </div>
   )
