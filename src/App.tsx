@@ -1,6 +1,5 @@
-import React, { SetStateAction, useEffect, useState, useRef, DragEvent, MouseEvent } from "react";
-import { Field3d, Field3dObject, Field3dPoseVisualizer, useEntry } from "@frc-web-components/react";
-import { Field, FieldPath, FieldRobot } from "@frc-web-components/react";
+import React, { SetStateAction, useEffect, useState } from "react";
+import { useEntry } from "@frc-web-components/react";
 import "@frc-web-components/fwc/components/field3d";
 
 // or to import all components:
@@ -8,18 +7,9 @@ import "@frc-web-components/fwc/components";
 import './styles/global.css';
 import { interpretFMSControlData as interpretControlData } from "./FMSInterpreter";
 import CSPField from "./components/CSPField";
-import { Fullscreen } from "lucide-react";
 import CSPBoolean from "./components/CSPBoolean";
 import CSPAutonChooser from "./components/CSPAutonChooser";
 
-class WristConstants {
-  public static START_ANGLE = 180;
-  public static DOWN_ANGLE = 90;
-}
-
-class ElevatorConstants {
-  public static metersToPixels = 1;
-}
 
 interface Item {
   id: string;
@@ -141,10 +131,11 @@ const App: React.FC = () => {
         <CSPAutonChooser setAutoCommands={setAutoCommands}/>
       </div>
       <div className="tab-container-none" style={(currentTab=='none') ? {display: 'flex', position: 'relative'} : {display: 'none'}} onClick={() => console.log(poseStruct, parseAdvantageKitPose2d(poseStruct))}>
-          <CSPField robotPose={parseAdvantageKitPose2d(poseStruct)} robotDimensions={{length: 0.762, width: 0.736}} downScale={0.5}/>
+          <CSPField robotPose={parseAdvantageKitPose2d(poseStruct)} robotDimensions={{length: 0.762, width: 0.736}} downScale={1}/>
           {/* <ReactP5Wrapper sketch={sketch} eleheight={100} />; */}
           <CSPBoolean value_key={"At Goal?"} state={false} styling={{position: 'absolute', top: 0, right: 15}}/>
-          <CSPBoolean value_key={"Shouler Reached?"} state={true} styling={{position: 'absolute', top: 115, right: 15}}/>
+          <CSPBoolean value_key={"Shoulder Reached?"} state={true} styling={{position: 'absolute', top: 115, right: 15}}/>
+          <CSPBoolean value_key={"Shooter Reached?"} state={false} styling={{position: 'absolute', top: 230, right: 15}}/>
       </div>
     </div>
   )
