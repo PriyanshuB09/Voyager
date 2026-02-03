@@ -5,38 +5,39 @@ import "@frc-web-components/fwc/components/field3d";
 // or to import all components:
 import "@frc-web-components/fwc/components";
 import './styles/global.css';
-import { interpretFMSControlData as interpretControlData } from "./FMSInterpreter";
-import CSPField from "./components/CSPField";
-import CSPBoolean from "./components/CSPBoolean";
-import CSPAutonChooser from "./components/CSPAutonChooser";
+import './styles/font.css';
 
 
-interface Item {
-  id: string;
-  text: string;
+const fieldImageDimensions = {
+  width: 310,
+  length: 673
 }
 
-interface DragInfo {
-  draggedId: string;
-  selectedIds: string[];
-  sourceIndex: number;
+const fieldDimensionsInMeters = {
+    length: 16.54,
+    width: 8.06
+}
+
+let correctedPose = {
+        length: fieldImageDimensions.length / fieldDimensionsInMeters.length,
+        width: fieldImageDimensions.width / fieldDimensionsInMeters.width
 }
 
 interface Pose2d {
-  x: number;        // meters
-  y: number;        // meters
-  rotation: number; // radians
+    x: number;        // meters
+    y: number;        // meters
+    rotation: number; // radians
 }
 
-function parseAdvantageKitPose2d(data: Uint8Array): Pose2d {
+function parsePose2d(data: Uint8Array): Pose2d {
   if (!(data instanceof Uint8Array)) {
-    console.warn("parseAdvantageKitPose2d: Expected Uint8Array input.");
+    console.warn("parsePose2d: Expected Uint8Array input.");
     return {x: 0, y: 0, rotation: 0};
   }
 
   if (data.byteLength < 24) {
     console.warn(
-      `parseAdvantageKitPose2d: Invalid length (${data.byteLength}). Expected 24 bytes.`
+      `parsePose2d: Invalid length (${data.byteLength}). Expected 24 bytes.`
     );
     return {x: 0, y: 0, rotation: 0};
   }
@@ -50,95 +51,83 @@ function parseAdvantageKitPose2d(data: Uint8Array): Pose2d {
   return { x, y, rotation };
 }
 
-const initialItems: Item[] = Array.from({ length: 0 }).map((_, i) => ({
-  id: `item-${i + 1}`,
-  text: `Item ${i + 1}`,
-}));
-
 const App: React.FC = () => {
-  const [currentTab, setCurrentTab] = useState<string>('none');
-  const [sideBarOpen, setSideBarOpen] = useState<boolean>(false);
-  const [blink, setBlink] = useState<boolean>(false);
-
-  const defaultBanner = '#0d1821';
-  const [bannerStatus, setBannerStatus] = useState<{color: string, blink: boolean}>({color: defaultBanner, blink: false});
-
-
-  const [autoCommands, setAutoCommands] = useEntry<string[]>('/CSPDashboard/AutoCommands', []);
+  const [progress, setProgress] = useState<number>(0);
+  const [state, setState] = useState<string>("Driver Station");
   const [poseStruct, setPoseStruct] = useEntry<Uint8Array>('/AdvantageKit/RealOutputs/Odometry/Robot', new Uint8Array([...new Array(24).fill(0)]));
-  const [fullIntaked, setFullIntaked] = useEntry<boolean>('SETKEYLATER', false);
-  const [intakeVolts, setIntakeVolts] = useEntry<number>('SETKEYLATER', 0.0);
 
-  const [atAngle, setAtAngle] = useEntry<boolean>('SETKEYLATER', false);
+  // useEffect(() => {
+  //   const interval = setInterval(() => {
+  //     setProgress((prevProgress: number) => (prevProgress >= 100 ? 0 : prevProgress + 0.1));
+  //   }, 1);
 
-
-  useEffect(() => {
-    if (intakeVolts > 0.0) setBannerStatus({...bannerStatus, blink: true});
-    else setBannerStatus({...bannerStatus, blink: false});
-
-    if (fullIntaked) setBannerStatus({...bannerStatus, color: '#00ff00'});
-    else setBannerStatus({...bannerStatus, color: '#ff5c00'});
-
-    // if (!(intakeVolts > 0.0) && !fullIntaked) setBannerStatus({color: '#0d1821', blink: false});
-
-    // setBannerStatus({color: '#ff5c00', blink: true});
-    console.log(bannerStatus);
-
-    document.documentElement.style.setProperty('--blink-color', bannerStatus.color);
-  }, [intakeVolts, fullIntaked]);
-
-  // NetworkTables Entries
-
-  const [fmsControlData] = useEntry<number>('/FMSInfo/FMSControlData', 0);
+  //   return () => clearInterval(interval);
+  // }, []);
 
   return (
-    <div onClick={() => {if (sideBarOpen) setSideBarOpen(false)}} style={{width: '100%', height: '100vh', overflow: 'auto'}}>
-      <div className="full-state">
-        <div className="state-indicator" style={(interpretControlData(fmsControlData).autonomous) ? {left: '0px', backgroundColor: 'orange'} : {left: '50%', backgroundColor: 'cyan'}}></div>
-        <div className="state-back">
-          <div>Auton</div>
-          <div>TeleOp</div>
+    <div className="w-full h-[100vh] flex flex-col">
+      <div className="w-full h-[42px] draggable bg-[#002c65] select-none fixed z-10">
+        <div className="absolute top-0 left-0 h-[39px] w-10 flex items-center justify-center px-10 mx-10">
+          <img src="./assets/icons/Group 1.png" alt="App Icon" className="w-5 h-5 ml-2" />
         </div>
-      </div>
-      <div className="full-state" style={{top: '0px', right: '150px'}}>
-        <div className="state-indicator" style={(interpretControlData(fmsControlData).enabled) ? {left: '0px', backgroundColor: '#00ff00'} : (true)?{left: '50%', backgroundColor: 'red'}:(blink)?{left: '50%', backgroundColor: 'red'}:{left: '50%', backgroundColor: 'yellow'}}></div>
-        <div className="state-back">
-          <div>Enabled</div>
-          <div>Disabled</div>
-        </div>
-      </div>
-      <div id={'titlebar'}>
-        <div className="navbar">
-            <img src="../../assets/icons/icon.png" alt="App Logo" className="logo" />
-            <span className="app-title">CSP Dashboard</span>
-        </div>
+        <div className="absolute top-0 left-20 h-[40px] w-[400px] flex items-center justify-evenly px-[10px] mx-[10px]">
+          <div className="text-white font-bold w-[30px] h-[30px] bg-[#0f1720] items-center text-center justify-center flex rounded-full"><i className="fa-solid fa-battery-low"></i></div>
+          <div className="text-white font-bold w-[30px] h-[30px] bg-[#0f1720] items-center text-center justify-center flex rounded-full"><i className="fa-solid fa-wifi-slash"></i></div>
+          <div className="text-white font-semibold w-[100px] h-[30px] bg-[#0f1720] items-center text-center justify-center flex rounded-full">Auto</div>
+          <div className="text-white font-semibold w-[100px] h-[30px] bg-[#0f1720] items-center text-center justify-center flex rounded-full">Tele</div>
+          <div className="text-white font-semibold w-[100px] h-[30px] bg-[#0f1720] items-center text-center justify-center flex rounded-full">End</div>
         </div>
 
-      {/* Fill Later */}
-      <div  className={(bannerStatus.blink)?'top-bar blink':'top-bar no-blink'}>
-        
-      </div>
-      <div className="nav-icon" onClick={() => setSideBarOpen(!sideBarOpen)}>☰</div>
-
-      {/* SideBar */}
-      <div className="side-bar" style={(sideBarOpen) ? {height: '400px', padding: '10px', color: 'white'} : {height: '0px', padding: '0px', color: '#023e8a'}}>
-        <div className="side-bar-component" style={{borderColor: sideBarOpen?'white':'#023e8a'}} onClick={() => setCurrentTab(currentTab=='auton'?'none':'auton')}>Auton Chooser</div>
-        <div className="side-bar-component" style={{borderColor: sideBarOpen?'white':'#023e8a'}}>Custom Tab</div>
-        <div className="side-bar-component" style={{borderColor: sideBarOpen?'white':'#023e8a'}}>Embedded DataTable</div>
+        <div className="absolute top-0 right-50 h-[40px] w-[500px] flex items-center justify-evenly px-[10px] mx-[10px]">
+          <div className="text-white font-semibold w-[500px] h-[30px] bg-[#0f1720] items-center text-center justify-center flex rounded-full">Time Left: -1</div>
+        </div>
       </div>
 
-      <div className="tab-container" style={(currentTab=='auton') ? {display: 'flex'} : {display: 'none'}}>
-        <CSPAutonChooser setAutoCommands={setAutoCommands}/>
+      <div className="absolute top-0 left-0 w-full h-full z-20 transition-opacity duration-1 ease-in-out" style={{ display: state == "Task Selector" ? "block" : "none"}}>
+        <div className="absolute top-[40px] left-0 w-full h-[calc(100vh-40px)] bg-black z-20 backdrop-blur-sm opacity-70"></div>
+        <div className="absolute top-[80px] left-[5%] w-[85%] h-[calc(100vh-140px)] bg-[#1B548F] z-30 rounded-md border-2 border-white flex flex-col items-center justify-flex-start">
+          <img src="../assets/images/FE-2026-_REBUILT_Playing_Field_With_Fuel_Clipped_Rotated.png" alt="Field 2D" className="field2 object-cover" />
+        </div>
       </div>
-      <div className="tab-container-none" style={(currentTab=='none') ? {display: 'flex', position: 'relative'} : {display: 'none'}} onClick={() => console.log(poseStruct, parseAdvantageKitPose2d(poseStruct))}>
-          <CSPField robotPose={parseAdvantageKitPose2d(poseStruct)} robotDimensions={{length: 0.762, width: 0.736}} downScale={1}/>
-          {/* <ReactP5Wrapper sketch={sketch} eleheight={100} />; */}
-          <CSPBoolean value_key={"At Goal?"} state={false} styling={{position: 'absolute', top: 0, right: 15}}/>
-          <CSPBoolean value_key={"Shoulder Reached?"} state={true} styling={{position: 'absolute', top: 115, right: 15}}/>
-          <CSPBoolean value_key={"Shooter Reached?"} state={false} styling={{position: 'absolute', top: 230, right: 15}}/>
+
+      <div className="absolute bottom-10 right-10 w-10 h-10 bg-[#1B548F] rounded-full border-2 border-white flex justify-center text-center items-center text-white z-999" 
+      onClick={() => setState(state == "Task Selector" ? "Driver Station" : "Task Selector")}>
+        {(state == "Driver Station" ? <i className="fa-solid fa-chart-diagram"></i> : <i className="fa-solid fa-table"></i>) }
+      </div>
+
+      <div className="w-full h-[100vh] bg-[#0f1720] text-white">
+        <div className="absolute top-[40px] left-[0px] overflow-hidden">
+          <img src="../assets/images/FE-2026-_REBUILT_Playing_Field_Clipped.png" alt="Field 2D" className="field object-cover" />
+          <div style={{
+            position: 'absolute',
+            width: 0.8382 * correctedPose.length,
+            height: 0.8382 * correctedPose.width,
+            backgroundColor: 'white',
+            // rotate: `${parsePose2d(poseStruct).rotation * 180 / Math.PI + 180}deg`,
+            // top: correctedPose.width * parsePose2d(poseStruct).y, 
+            left: fieldImageDimensions.width - correctedPose.width * parsePose2d(poseStruct).y,
+            top: fieldDimensionsInMeters.length - correctedPose.length * parsePose2d(poseStruct).x,
+            // top: (fieldImageDimensions.length - correctedPose.length * parsePose2d(poseStruct).x),  
+            rotate: '0deg',
+          }}>▶</div>
+        </div>
+        <div className="absolute top-[50px] right-[0px] w-[72vw] h-100">
+          <div className="absolute w-[71vw] h-[92vh]">
+            <div className="bg-[#1B548F] w-[100%] h-[60px] rounded-md absolute top-0 left-0">
+              <div className="w-full h-[10px] bg-black absolute top-[25px] left-0"></div>
+              <div className={`w-[20px] h-[20px] ${progress > 12.5 ? 'bg-green-400' : 'bg-black'} rounded-full absolute top-[20px] left-[12.5%]`}></div>
+              <div className={`w-[20px] h-[20px] ${progress > 18.75 ? 'bg-green-400' : 'bg-black'} rounded-full absolute top-[20px] left-[18.75%]`}></div>
+              <div className={`w-[20px] h-[20px] ${progress > 34.375 ? 'bg-green-400' : 'bg-black'} rounded-full absolute top-[20px] left-[34.375%]`}></div>
+              <div className={`w-[20px] h-[20px] ${progress > 50 ? 'bg-green-400' : 'bg-black'} rounded-full absolute top-[20px] left-[50%]`}></div> 
+              <div className={`w-[20px] h-[20px] ${progress > 65.625 ? 'bg-green-400' : 'bg-black'} rounded-full absolute top-[20px] left-[65.625%]`}></div>
+              <div className={`w-[20px] h-[20px] ${progress > 81.25 ? 'bg-green-400' : 'bg-black'} rounded-full absolute top-[20px] left-[81.25%]`}></div>
+              <div className={`h-[10px] bg-green-400 absolute top-[25px] left-0`} style={{ width: `${progress}%` }}></div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
-  )
+  );
 };
 
 export default App;

@@ -6,7 +6,7 @@ function createWindow() {
   let iconPath;
 
   if (process.platform === 'win32') {
-    iconPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../assets/icons/icon2.ico');
+    iconPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../assets/icons/Group 1.ico');
   } else if (process.platform === 'darwin') { // macOS
     iconPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../assets/icons/icon.icns');
   } else { // Linux
@@ -16,7 +16,7 @@ function createWindow() {
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
-    icon: path.join(path.dirname(fileURLToPath(import.meta.url)), '../assets/icons/icon2.ico'),
+    icon: path.join(path.dirname(fileURLToPath(import.meta.url)), '../assets/icons/Group 1.ico'),
     webPreferences: {
       preload: path.join(path.dirname(fileURLToPath(import.meta.url)), "../electron/preload.js"),
     },
@@ -25,7 +25,7 @@ function createWindow() {
     backgroundColor: '#000000',
     accentColor: '#000000',
     // expose window controls in Windows/Linux
-    ...(process.platform !== 'darwin' ? {titleBarOverlay: {color: '#0D1821', symbolColor: '#B4CDED', height: 39}} : {})
+    ...(process.platform !== 'darwin' ? {titleBarOverlay: {color: '#002c65', symbolColor: '#e8e8e8', height: 39}} : {})
   });
 
   // win.webContents.openDevTools();

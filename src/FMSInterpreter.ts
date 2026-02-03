@@ -103,3 +103,42 @@ export function interpretFMSControlData(rawValue: unknown): FMSControlDecoded {
     summary,
   };
 }
+
+interface Item {
+  id: string;
+  text: string;
+}
+
+interface DragInfo {
+  draggedId: string;
+  selectedIds: string[];
+  sourceIndex: number;
+}
+
+interface Pose2d {
+  x: number;        // meters
+  y: number;        // meters
+  rotation: number; // radians
+}
+
+function parsePose2d(data: Uint8Array): Pose2d {
+  if (!(data instanceof Uint8Array)) {
+    console.warn("parsePose2d: Expected Uint8Array input.");
+    return {x: 0, y: 0, rotation: 0};
+  }
+
+  if (data.byteLength < 24) {
+    console.warn(
+      `parsePose2d: Invalid length (${data.byteLength}). Expected 24 bytes.`
+    );
+    return {x: 0, y: 0, rotation: 0};
+  }
+
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+
+  const x = view.getFloat64(0, true);   // little-endian
+  const y = view.getFloat64(8, true);
+  const rotation = view.getFloat64(16, true);
+
+  return { x, y, rotation };
+}
