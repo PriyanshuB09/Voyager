@@ -9,8 +9,8 @@ import './styles/font.css';
 
 
 const fieldImageDimensions = {
-  width: 310,
-  length: 673
+  width: 349,
+  length: 710
 }
 
 const fieldDimensionsInMeters = {
@@ -21,6 +21,11 @@ const fieldDimensionsInMeters = {
 let correctedPose = {
         length: fieldImageDimensions.length / fieldDimensionsInMeters.length,
         width: fieldImageDimensions.width / fieldDimensionsInMeters.width
+}
+
+let robotDimensionsInMeters = {
+    length: 0.8382,
+    width: 0.8382
 }
 
 interface Pose2d {
@@ -56,6 +61,9 @@ const App: React.FC = () => {
   const [state, setState] = useState<string>("Driver Station");
   const [poseStruct, setPoseStruct] = useEntry<Uint8Array>('/AdvantageKit/RealOutputs/Odometry/Robot', new Uint8Array([...new Array(24).fill(0)]));
 
+  const [brownOut, setBrownOut] = useEntry<boolean>('/AdvantageKit/SystemStats/BrownedOut', false);
+  const [connected, setConnected] = useEntry<boolean>('/AdvantageKit/DriverStation/DSAttached', false);
+
   // useEffect(() => {
   //   const interval = setInterval(() => {
   //     setProgress((prevProgress: number) => (prevProgress >= 100 ? 0 : prevProgress + 0.1));
@@ -71,8 +79,8 @@ const App: React.FC = () => {
           <img src="./assets/icons/Group 1.png" alt="App Icon" className="w-5 h-5 ml-2" />
         </div>
         <div className="absolute top-0 left-20 h-[40px] w-[400px] flex items-center justify-evenly px-[10px] mx-[10px]">
-          <div className="text-white font-bold w-[30px] h-[30px] bg-[#0f1720] items-center text-center justify-center flex rounded-full"><i className="fa-solid fa-battery-low"></i></div>
-          <div className="text-white font-bold w-[30px] h-[30px] bg-[#0f1720] items-center text-center justify-center flex rounded-full"><i className="fa-solid fa-wifi-slash"></i></div>
+          <div className={`text-white font-bold w-[30px] h-[30px] ${brownOut ? "bg-[#DB8712]" : "bg-[#0f1720]"} items-center text-center justify-center flex rounded-full`}><i className="fa-solid fa-battery-low"></i></div>
+          <div className={`text-white font-bold w-[30px] h-[30px] ${connected ? "bg-[#54B510]" : "bg-[#0f1720]"} items-center text-center justify-center flex rounded-full`}><i className="fa-solid fa-wifi-slash"></i></div>
           <div className="text-white font-semibold w-[100px] h-[30px] bg-[#0f1720] items-center text-center justify-center flex rounded-full">Auto</div>
           <div className="text-white font-semibold w-[100px] h-[30px] bg-[#0f1720] items-center text-center justify-center flex rounded-full">Tele</div>
           <div className="text-white font-semibold w-[100px] h-[30px] bg-[#0f1720] items-center text-center justify-center flex rounded-full">End</div>
@@ -96,21 +104,28 @@ const App: React.FC = () => {
       </div>
 
       <div className="w-full h-[100vh] bg-[#0f1720] text-white">
-        <div className="absolute top-[40px] left-[0px] overflow-hidden">
-          <img src="../assets/images/FE-2026-_REBUILT_Playing_Field_Clipped.png" alt="Field 2D" className="field object-cover" />
+        <div className="absolute top-[40px] left-[0px] overflow-hidden rotate-180">
+          <img src="../assets/images/FE-2026-_REBUILT_Playing_Field_Clipped.png" alt="Field 2D" className="field object-cover rotate-180" />
           <div style={{
             position: 'absolute',
-            width: 0.8382 * correctedPose.length,
-            height: 0.8382 * correctedPose.width,
-            backgroundColor: 'white',
-            // rotate: `${parsePose2d(poseStruct).rotation * 180 / Math.PI + 180}deg`,
-            // top: correctedPose.width * parsePose2d(poseStruct).y, 
-            left: fieldImageDimensions.width - correctedPose.width * parsePose2d(poseStruct).y,
-            top: fieldDimensionsInMeters.length - correctedPose.length * parsePose2d(poseStruct).x,
-            // top: (fieldImageDimensions.length - correctedPose.length * parsePose2d(poseStruct).x),  
-            rotate: '0deg',
-          }}>▶</div>
-        </div>
+            top: correctedPose.length * (poseStruct ? parsePose2d(poseStruct).x: 0),
+            left: correctedPose.width * (poseStruct ? parsePose2d(poseStruct).y: 0),
+            width: robotDimensionsInMeters.width * correctedPose.width,
+            height: robotDimensionsInMeters.length * correctedPose.length,
+            backgroundColor: "black",
+            color: 'white',
+            boxSizing: 'border-box',
+            border: `${correctedPose.length * 0.0762}px solid red`,
+            transform: 'translate(-50%, -50%) rotate(' + ((poseStruct ? parsePose2d(poseStruct).rotation : 0) * 180 / Math.PI) + 'deg)',
+          }}>
+            <i className="fa-jelly-duo fa-regular fa-arrow-down" style={{
+                fontSize: 20,
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)'}}></i>
+          </div>
+        </div>  
         <div className="absolute top-[50px] right-[0px] w-[72vw] h-100">
           <div className="absolute w-[71vw] h-[92vh]">
             <div className="bg-[#1B548F] w-[100%] h-[60px] rounded-md absolute top-0 left-0">
