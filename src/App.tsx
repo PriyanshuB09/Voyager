@@ -116,14 +116,14 @@ const App: React.FC = () => {
             color: 'white',
             boxSizing: 'border-box',
             border: `${correctedPose.length * 0.0762}px solid red`,
-            transform: 'translate(-50%, -50%) rotate(' + ((poseStruct ? parsePose2d(poseStruct).rotation : 0) * 180 / Math.PI) + 'deg)',
+            transform: 'translate(-50%, -50%) rotate(' + (((poseStruct ? parsePose2d(poseStruct).rotation : 0) * -180 / Math.PI) + 90) + 'deg)',
           }}>
-            <i className="fa-jelly-duo fa-regular fa-arrow-down" style={{
+            <i style={{
                 fontSize: 20,
                 position: 'absolute',
                 top: '50%',
                 left: '50%',
-                transform: 'translate(-50%, -50%)'}}></i>
+                transform: 'translate(-50%, -50%)'}}>-|</i>
           </div>
         </div>  
         <div className="absolute top-[50px] right-[0px] w-[72vw] h-100">
