@@ -6,6 +6,7 @@ import "@frc-web-components/fwc/components/field3d";
 import "@frc-web-components/fwc/components";
 import './styles/global.css';
 import './styles/font.css';
+import { interpretFMSControlData, FMSControlDecoded } from "./FMSInterpreter";
 
 
 const fieldImageDimensions = {
@@ -56,21 +57,47 @@ function parsePose2d(data: Uint8Array): Pose2d {
   return { x, y, rotation };
 }
 
+const totalMatchTime = 161;
+const shiftTimes = [
+  20,
+  1,
+  10,
+  25,
+  25,
+  25,
+  25,
+  30
+];
+
 const App: React.FC = () => {
   const [progress, setProgress] = useState<number>(0);
   const [state, setState] = useState<string>("Driver Station");
   const [poseStruct, setPoseStruct] = useEntry<Uint8Array>('/AdvantageKit/RealOutputs/Odometry/Robot', new Uint8Array([...new Array(24).fill(0)]));
 
-  const [brownOut, setBrownOut] = useEntry<boolean>('/AdvantageKit/SystemStats/BrownedOut', false);
+  const [brownOut] = useEntry<boolean>('/AdvantageKit/SystemStats/BrownedOut', false);
   const [connected, setConnected] = useEntry<boolean>('/AdvantageKit/DriverStation/DSAttached', false);
+
+  const [isRedAlliance] = useEntry<boolean>('/AdvantageKit/DriverStation/IsRedAlliance', false);
+  
+  const [autoWinner] = useEntry<string>('/AdvantageKit/DriverStation/GameSpecificMessage', 'B');
+
+  const [matchTimeLeft] = useEntry<number>('/AdvantageKit/DriverStation/MatchTime', -1);
+
+  const [fmsControlData, setFmsControlData] = useEntry<Uint8Array>('/FMSInfo/FMSControlData', new Uint8Array([...new Array(24).fill(0)]));
+
+  // const [matchTime, setMatchTime] = useState<number>(0);
 
   // useEffect(() => {
   //   const interval = setInterval(() => {
-  //     setProgress((prevProgress: number) => (prevProgress >= 100 ? 0 : prevProgress + 0.1));
+  //     setMatchTime((prevProgress: number) => (prevProgress >= totalMatchTime ? 0 : prevProgress + 0.05));
   //   }, 1);
 
   //   return () => clearInterval(interval);
   // }, []);
+
+  useEffect(() => {
+   
+  }, [matchTimeLeft]);
 
   return (
     <div className="w-full h-[100vh] flex flex-col">
@@ -81,13 +108,13 @@ const App: React.FC = () => {
         <div className="absolute top-0 left-20 h-[40px] w-[400px] flex items-center justify-evenly px-[10px] mx-[10px]">
           <div className={`text-white font-bold w-[30px] h-[30px] ${brownOut ? "bg-[#DB8712]" : "bg-[#0f1720]"} items-center text-center justify-center flex rounded-full`}><i className="fa-solid fa-battery-low"></i></div>
           <div className={`text-white font-bold w-[30px] h-[30px] ${connected ? "bg-[#54B510]" : "bg-[#0f1720]"} items-center text-center justify-center flex rounded-full`}><i className="fa-solid fa-wifi-slash"></i></div>
-          <div className="text-white font-semibold w-[100px] h-[30px] bg-[#0f1720] items-center text-center justify-center flex rounded-full">Auto</div>
-          <div className="text-white font-semibold w-[100px] h-[30px] bg-[#0f1720] items-center text-center justify-center flex rounded-full">Tele</div>
-          <div className="text-white font-semibold w-[100px] h-[30px] bg-[#0f1720] items-center text-center justify-center flex rounded-full">End</div>
+          <div className={`text-white font-semibold w-[100px] h-[30px] bg-[#0f1720] items-center text-center justify-center flex rounded-full`}>Auto</div>
+          <div className={`text-white font-semibold w-[100px] h-[30px] bg-[#0f1720] items-center text-center justify-center flex rounded-full`}>Tele</div>
+          <div className={`text-white font-semibold w-[100px] h-[30px] bg-[#0f1720] items-center text-center justify-center flex rounded-full`}>End</div>
         </div>
 
         <div className="absolute top-0 right-50 h-[40px] w-[500px] flex items-center justify-evenly px-[10px] mx-[10px]">
-          <div className="text-white font-semibold w-[500px] h-[30px] bg-[#0f1720] items-center text-center justify-center flex rounded-full">Time Left: -1</div>
+          <div className={`font-semibold w-[500px] h-[30px] ${(false) ? "text-white bg-[#0f1720]" : "text-black bg-[#FFD547]"} items-center text-center justify-center flex rounded-full`}>Time Left In Shift: {-1}</div>
         </div>
       </div>
 
@@ -104,7 +131,7 @@ const App: React.FC = () => {
       </div>
 
       <div className="w-full h-[100vh] bg-[#0f1720] text-white">
-        <div className="absolute top-[40px] left-[0px] overflow-hidden rotate-180">
+        <div className={`absolute top-[40px] left-[0px] overflow-hidden ${(isRedAlliance) ? '' : 'rotate-180'}`}>
           <img src="../assets/images/FE-2026-_REBUILT_Playing_Field_Clipped.png" alt="Field 2D" className="field object-cover rotate-180" />
           <div style={{
             position: 'absolute',
@@ -116,27 +143,27 @@ const App: React.FC = () => {
             color: 'white',
             boxSizing: 'border-box',
             border: `${correctedPose.length * 0.0762}px solid red`,
-            transform: 'translate(-50%, -50%) rotate(' + (((poseStruct ? parsePose2d(poseStruct).rotation : 0) * -180 / Math.PI) + 90) + 'deg)',
+            transform: 'translate(-50%, -50%) rotate(' + (((poseStruct ? parsePose2d(poseStruct).rotation : 0) * -180 / Math.PI) + 180) + 'deg)',
           }}>
             <i style={{
                 fontSize: 20,
                 position: 'absolute',
                 top: '50%',
                 left: '50%',
-                transform: 'translate(-50%, -50%)'}}>-|</i>
+                transform: 'translate(-50%, -50%)'}} className="fa-slab-press fa-regular fa-arrow-down"></i>
           </div>
         </div>  
         <div className="absolute top-[50px] right-[0px] w-[72vw] h-100">
           <div className="absolute w-[71vw] h-[92vh]">
             <div className="bg-[#1B548F] w-[100%] h-[60px] rounded-md absolute top-0 left-0">
               <div className="w-full h-[10px] bg-black absolute top-[25px] left-0"></div>
-              <div className={`w-[20px] h-[20px] ${progress > 12.5 ? 'bg-green-400' : 'bg-black'} rounded-full absolute top-[20px] left-[12.5%]`}></div>
-              <div className={`w-[20px] h-[20px] ${progress > 18.75 ? 'bg-green-400' : 'bg-black'} rounded-full absolute top-[20px] left-[18.75%]`}></div>
-              <div className={`w-[20px] h-[20px] ${progress > 34.375 ? 'bg-green-400' : 'bg-black'} rounded-full absolute top-[20px] left-[34.375%]`}></div>
-              <div className={`w-[20px] h-[20px] ${progress > 50 ? 'bg-green-400' : 'bg-black'} rounded-full absolute top-[20px] left-[50%]`}></div> 
-              <div className={`w-[20px] h-[20px] ${progress > 65.625 ? 'bg-green-400' : 'bg-black'} rounded-full absolute top-[20px] left-[65.625%]`}></div>
-              <div className={`w-[20px] h-[20px] ${progress > 81.25 ? 'bg-green-400' : 'bg-black'} rounded-full absolute top-[20px] left-[81.25%]`}></div>
-              <div className={`h-[10px] bg-green-400 absolute top-[25px] left-0`} style={{ width: `${progress}%` }}></div>
+              <div className={`w-[20px] h-[20px] ${true ? 'bg-green-400' : 'bg-black'} rounded-full absolute top-[20px] left-[12.5%]`}></div>
+              <div className={`w-[20px] h-[20px] ${true ? 'bg-green-400' : 'bg-black'} rounded-full absolute top-[20px] left-[18.75%]`}></div>
+              <div className={`w-[20px] h-[20px] ${true ? 'bg-green-400' : 'bg-black'} rounded-full absolute top-[20px] left-[34.375%]`}></div>
+              <div className={`w-[20px] h-[20px] ${true ? 'bg-green-400' : 'bg-black'} rounded-full absolute top-[20px] left-[50%]`}></div> 
+              <div className={`w-[20px] h-[20px] ${true ? 'bg-green-400' : 'bg-black'} rounded-full absolute top-[20px] left-[65.625%]`}></div>
+              <div className={`w-[20px] h-[20px] ${true ? 'bg-green-400' : 'bg-black'} rounded-full absolute top-[20px] left-[81.25%]`}></div>
+              <div className={`h-[10px] bg-green-400 absolute top-[25px] left-0`} style={{ width: `${100}%` }}></div>
             </div>
           </div>
         </div>
