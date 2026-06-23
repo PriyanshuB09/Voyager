@@ -1,8 +1,18 @@
-var _a = require("electron"), contextBridge = _a.contextBridge, ipcRenderer = _a.ipcRenderer;
+import { contextBridge, ipcRenderer } from "electron";
+
 contextBridge.exposeInMainWorld("electronAPI", {
-    windowControl: {
-        minimize: function () { return ipcRenderer.send("window-minimize"); },
-        maximize: function () { return ipcRenderer.send("window-maximize"); },
-        close: function () { return ipcRenderer.send("window-close"); }
-    },
+  pickDirectory: () => ipcRenderer.invoke("dialog:pick-directory"),
+
+  writeTextFile: (folder, fileName, text) =>
+    ipcRenderer.invoke("fs:write-text-file", {
+      folder,
+      fileName,
+      text,
+    }),
+
+  readTextFile: (folder, fileName) =>
+    ipcRenderer.invoke("fs:read-text-file", {
+      folder,
+      fileName,
+    }),
 });

@@ -1,8 +1,8 @@
 {
-  "name": "frc-dashboard",
+  "name": "csp-voyager",
   "version": "1.0.0",
   "author": "Priyanshu Biswal",
-  "description": "A custom dashboard for FRC",
+  "description": "An open-source FIRST Robotics Competition autonomous builder dashboard. Promotes modularity and branching, as well visual graphs and support for object detection deviances.",
   "main": "electron/main.ts",
   "type": "module",
   "scripts": {
@@ -16,6 +16,7 @@
     "@frc-web-components/react": "^2.1.2",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
+    "fs": "^0.0.1-security",
     "lucide-react": "^0.545.0",
     "ntcore-react": "^2.0.3",
     "ntcore-ts-client": "^3.1.3",
@@ -36,8 +37,8 @@
     "vite": "^5.4.20"
   },
   "build": {
-    "appId": "com.frcteam4188.cspdash",
-    "productName": "CSP Dashboard",
+    "appId": "com.frcteam4188.voyager",
+    "productName": "Voyager",
     "win": {
       "icon": "build/icons/icon.ico",
       "target": "portable"
@@ -45,5 +46,15 @@
     "linux": {
       "icon": "build/icons/256x256.png"
     }
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PriyanshuB09/Voyager.git"
+  },
+  "keywords": [],
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/PriyanshuB09/Voyager/issues"
+  },
+  "homepage": "https://github.com/PriyanshuB09/Voyager#readme"
 }

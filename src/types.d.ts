@@ -3,11 +3,16 @@ export {};
 declare global {
   interface Window {
     electronAPI: {
-      windowControl: {
-        minimize: () => void;
-        maximize: () => void;
-        close: () => void;
-      };
+      pickDirectory: () => Promise<string | null>;
+      writeTextFile: (
+        folder: string,
+        fileName: string,
+        text: string
+      ) => Promise<void>;
+      readTextFile: (
+        folder: string,
+        fileName: string
+      ) => Promise<string | null>;
     };
   }
 }

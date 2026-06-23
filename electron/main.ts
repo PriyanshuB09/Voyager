@@ -1,6 +1,10 @@
-import { app, BrowserWindow, nativeImage, nativeTheme, ipcMain } from 'electron';
+import { app, BrowserWindow, nativeImage, nativeTheme, ipcMain, dialog } from 'electron';
+import fs from "fs";
 import path from 'path';
 import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 function createWindow() {
   let iconPath;
@@ -18,14 +22,16 @@ function createWindow() {
     height: 800,
     icon: path.join(path.dirname(fileURLToPath(import.meta.url)), '../assets/icons/Group 1.ico'),
     webPreferences: {
-      preload: path.join(path.dirname(fileURLToPath(import.meta.url)), "../electron/preload.js"),
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
     },
     titleBarStyle: 'hidden',
     // frame: false,
-    backgroundColor: '#000000',
-    accentColor: '#000000',
+    backgroundColor: '#dfd9d9',
+    accentColor: '#969696',
     // expose window controls in Windows/Linux
-    ...(process.platform !== 'darwin' ? {titleBarOverlay: {color: '#002c65', symbolColor: '#e8e8e8', height: 39}} : {})
+    ...(process.platform !== 'darwin' ? {titleBarOverlay: {color: '#EDEDED', symbolColor: '#141414', height: 40}} : {})
   });
 
   // win.webContents.openDevTools();
@@ -52,3 +58,40 @@ app.on('activate', () => {
     createWindow();
   }
 });
+
+ipcMain.handle("dialog:pick-directory", async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ["openDirectory", "createDirectory"],
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+
+  return result.filePaths[0];
+});
+
+ipcMain.handle(
+  "fs:write-text-file",
+  async (_event, { folder, fileName, text }) => {
+    await fs.promises.writeFile(
+      path.join(folder, fileName),
+      text,
+      "utf8"
+    );
+  }
+);
+
+ipcMain.handle(
+  "fs:read-text-file",
+  async (_event, { folder, fileName }) => {
+    try {
+      return await fs.promises.readFile(
+        path.join(folder, fileName),
+        "utf8"
+      );
+    } catch {
+      return null;
+    }
+  }
+);
