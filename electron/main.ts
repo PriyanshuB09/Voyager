@@ -1,59 +1,107 @@
-import { app, BrowserWindow, nativeImage, nativeTheme, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, nativeTheme, ipcMain, dialog } from "electron";
 import fs from "fs";
-import path from 'path';
-import { fileURLToPath } from 'url';
+import path from "path";
+import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+function assertNonEmptyString(value: string, name: string) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`${name} must be a non-empty string.`);
+  }
+}
+
+function assertSafeFileName(fileName: string) {
+  assertNonEmptyString(fileName, "fileName");
+
+  if (
+    fileName.includes("..") ||
+    fileName.includes("/") ||
+    fileName.includes("\\") ||
+    path.isAbsolute(fileName)
+  ) {
+    throw new Error(`Unsafe file name: ${fileName}`);
+  }
+}
+
+function resolveSafeFilePath(folder: string, fileName: string) {
+  assertNonEmptyString(folder, "folder");
+  assertSafeFileName(fileName);
+
+  const resolvedFolder = path.resolve(folder);
+  const resolvedFile = path.resolve(resolvedFolder, fileName);
+
+  if (
+    resolvedFile !== resolvedFolder &&
+    !resolvedFile.startsWith(resolvedFolder + path.sep)
+  ) {
+    throw new Error("Resolved file path escaped the target folder.");
+  }
+
+  return {
+    resolvedFolder,
+    resolvedFile,
+  };
+}
+
 function createWindow() {
   let iconPath;
 
-  if (process.platform === 'win32') {
-    iconPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../assets/icons/Group 1.ico');
-  } else if (process.platform === 'darwin') { // macOS
-    iconPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../assets/icons/icon.icns');
-  } else { // Linux
-    iconPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../assets/icons/icon.png');
+  if (process.platform === "win32") {
+    iconPath = path.join(__dirname, "../assets/icons/Group 1.ico");
+  } else if (process.platform === "darwin") {
+    iconPath = path.join(__dirname, "../assets/icons/icon.icns");
+  } else {
+    iconPath = path.join(__dirname, "../assets/icons/icon.png");
   }
 
-  const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    icon: path.join(path.dirname(fileURLToPath(import.meta.url)), '../assets/icons/Group 1.ico'),
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-    titleBarStyle: 'hidden',
-    // frame: false,
-    backgroundColor: '#dfd9d9',
-    accentColor: '#969696',
-    // expose window controls in Windows/Linux
-    ...(process.platform !== 'darwin' ? {titleBarOverlay: {color: '#EDEDED', symbolColor: '#141414', height: 40}} : {})
-  });
+  const preloadPath = path.join(__dirname, "preload.js");
+console.log("[electron] preload path:", preloadPath);
+console.log("[electron] preload exists:", fs.existsSync(preloadPath));
 
-  // win.webContents.openDevTools();
+const win = new BrowserWindow({
+  width: 1200,
+  height: 800,
+  icon: iconPath,
+  webPreferences: {
+    preload: preloadPath,
+    contextIsolation: true,
+    nodeIntegration: false,
+  },
+  titleBarStyle: "hidden",
+  backgroundColor: "#080808",
+  accentColor: "#969696",
+  ...(process.platform !== "darwin"
+    ? {
+        titleBarOverlay: {
+          color: "#080808",
+          symbolColor: "#EDEDED",
+          height: 39,
+        },
+      }
+    : {}),
+});
 
   const startUrl =
     process.env.NODE_ENV === "development"
       ? "http://localhost:5173"
-      : `file://${path.join(path.dirname(fileURLToPath(import.meta.url)), "../dist/index.html")}`;
+      : `file://${path.join(__dirname, "../dist/index.html")}`;
+
   win.loadURL(startUrl);
 }
 
-nativeTheme.themeSource = 'dark';
+nativeTheme.themeSource = "light";
 
 app.whenReady().then(createWindow);
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") {
     app.quit();
   }
 });
 
-app.on('activate', () => {
+app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();
   }
@@ -71,27 +119,41 @@ ipcMain.handle("dialog:pick-directory", async () => {
   return result.filePaths[0];
 });
 
-ipcMain.handle(
-  "fs:write-text-file",
-  async (_event, { folder, fileName, text }) => {
-    await fs.promises.writeFile(
-      path.join(folder, fileName),
-      text,
-      "utf8"
-    );
-  }
-);
+ipcMain.handle("fs:make-directory", async (_event, { folder }) => {
+  assertNonEmptyString(folder, "folder");
 
-ipcMain.handle(
-  "fs:read-text-file",
-  async (_event, { folder, fileName }) => {
-    try {
-      return await fs.promises.readFile(
-        path.join(folder, fileName),
-        "utf8"
-      );
-    } catch {
-      return null;
-    }
+  const resolvedFolder = path.resolve(folder);
+  await fs.promises.mkdir(resolvedFolder, { recursive: true });
+
+  return true;
+});
+
+ipcMain.handle("fs:write-text-file", async (_event, { folder, fileName, text }) => {
+  assertNonEmptyString(text, "text");
+
+  const { resolvedFolder, resolvedFile } = resolveSafeFilePath(folder, fileName);
+
+  await fs.promises.mkdir(resolvedFolder, { recursive: true });
+  await fs.promises.writeFile(resolvedFile, text, "utf8");
+
+  return true;
+});
+
+ipcMain.handle("fs:read-text-file", async (_event, { folder, fileName }) => {
+  try {
+    const { resolvedFile } = resolveSafeFilePath(folder, fileName);
+    return await fs.promises.readFile(resolvedFile, "utf8");
+  } catch {
+    return null;
   }
-);
+});
+
+ipcMain.handle("fs:delete-text-file", async (_event, { folder, fileName }) => {
+  const { resolvedFile } = resolveSafeFilePath(folder, fileName);
+
+  await fs.promises.rm(resolvedFile, {
+    force: true,
+  });
+
+  return true;
+});

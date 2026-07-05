@@ -1,4 +1,6 @@
-import { contextBridge, ipcRenderer } from "electron";
+const { contextBridge, ipcRenderer } = require("electron");
+
+console.log("[preload] preload.js loaded");
 
 contextBridge.exposeInMainWorld("electronAPI", {
   pickDirectory: () => ipcRenderer.invoke("dialog:pick-directory"),
@@ -12,6 +14,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   readTextFile: (folder, fileName) =>
     ipcRenderer.invoke("fs:read-text-file", {
+      folder,
+      fileName,
+    }),
+
+  makeDirectory: (folder) =>
+    ipcRenderer.invoke("fs:make-directory", {
+      folder,
+    }),
+
+  deleteTextFile: (folder, fileName) =>
+    ipcRenderer.invoke("fs:delete-text-file", {
       folder,
       fileName,
     }),
