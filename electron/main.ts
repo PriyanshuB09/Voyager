@@ -70,12 +70,12 @@ const win = new BrowserWindow({
     nodeIntegration: false,
   },
   titleBarStyle: "hidden",
-  backgroundColor: "#080808",
+  backgroundColor: "#090D14",
   accentColor: "#969696",
   ...(process.platform !== "darwin"
     ? {
         titleBarOverlay: {
-          color: "#080808",
+          color: "#090D14",
           symbolColor: "#EDEDED",
           height: 39,
         },

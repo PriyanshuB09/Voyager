@@ -1,0 +1,2 @@
+[WARN] [Render] Measured slow frame capture during auto-worker calibration. {"multiplier":2.72,"p95Ms":1633,"sampledFrames":[0,150,300,450,599]}
+[WARN] [Render] Reduced auto worker count for high-cost capture workload to avoid Chrome compositor starvation. {"from":5,"to":2,"costMultiplier":2.72,"reasons":["calibration-p95=1633ms"]}

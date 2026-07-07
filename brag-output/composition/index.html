@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=1920, height=1080">
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      @font-face { font-family: "SF Pro Rounded"; src: url("assets/fonts/SF-Pro-Rounded-Semibold.ttf") format("truetype"); font-weight: 600; }
+      @font-face { font-family: "IBM Plex Sans"; src: url("assets/fonts/IBMPlexSans-Regular.ttf") format("truetype"); font-weight: 400; }
+      :root { --bg:#090d14; --panel:#0f1521; --panel2:#121a2a; --panel3:#172033; --text:#e5ecf7; --muted:#94a3b8; --accent:#5eead4; --accent2:#38bdf8; --warn:#facc15; --danger:#fb7185; --energy:.25; }
+      * { box-sizing:border-box; }
+      html, body { margin:0; width:1920px; height:1080px; overflow:hidden; background:var(--bg); color:var(--text); }
+      body { font-family:"IBM Plex Sans", sans-serif; }
+      #root { position:relative; width:1920px; height:1080px; overflow:hidden; background:var(--bg); }
+      .clip { position:absolute; inset:0; overflow:hidden; }
+      .scene-bg { position:absolute; inset:0; background-color:var(--bg); background-image:radial-gradient(circle at 75% 45%, rgba(56,189,248,calc(.08 + var(--energy) * .12)), transparent 38%), radial-gradient(circle at 20% 80%, rgba(94,234,212,.08), transparent 34%); }
+      .grid { position:absolute; inset:0; opacity:.17; background-image:linear-gradient(rgba(148,163,184,.18) 1px, transparent 1px),linear-gradient(90deg,rgba(148,163,184,.18) 1px,transparent 1px); background-size:64px 64px; mask-image:linear-gradient(to bottom,transparent,black 25%,black 75%,transparent); }
+      .grain { position:absolute; inset:0; opacity:.12; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.75' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.18'/%3E%3C/svg%3E"); }
+      .topmeta { position:absolute; left:72px; right:72px; top:42px; display:flex; align-items:center; justify-content:space-between; font-size:20px; letter-spacing:.14em; text-transform:uppercase; color:#a9b8cc; }
+      .poem-line { position:absolute; z-index:18; left:120px; right:120px; top:430px; text-align:center; font-family:"SF Pro Rounded"; font-size:78px; line-height:1.02; letter-spacing:-.025em; color:#f4f8ff; opacity:0; text-shadow:0 8px 45px rgba(0,0,0,.78),0 0 42px rgba(94,234,212,.2); pointer-events:none; }
+      #poem-1 { top:780px; font-size:50px; text-align:left; }
+      #poem-2, #poem-3, #poem-4 { top:452px; }
+      #poem-5 { top:205px; font-size:60px; }
+      .brand-mini { display:flex; gap:14px; align-items:center; color:var(--text); letter-spacing:.04em; font-family:"SF Pro Rounded"; text-transform:none; }
+      .vmark { display:grid; place-items:center; width:42px; height:42px; border:2px solid #5eead4; border-radius:12px; background:#121a2a; color:#e5ecf7; font-weight:900; font-size:24px; box-shadow:0 0 30px rgba(94,234,212,.22); }
+      .rule { height:2px; background:linear-gradient(90deg,var(--accent),rgba(94,234,212,0)); transform-origin:left; }
+      .eyebrow { color:var(--accent); font-size:21px; letter-spacing:.16em; line-height:1.25; text-transform:uppercase; margin-bottom:18px; }
+      h1,h2,h3,p { margin:0; }
+      .headline { font-family:"SF Pro Rounded"; font-weight:600; line-height:.98; letter-spacing:-.035em; }
+      .panel { background:rgba(15,21,33,.97); border:2px solid rgba(148,163,184,.28); border-radius:18px; box-shadow:0 28px 80px rgba(0,0,0,.42); overflow:hidden; }
+      .panelbar { height:76px; display:flex; align-items:center; justify-content:space-between; padding:0 28px; border-bottom:2px solid rgba(148,163,184,.18); background:#121a2a; }
+      .panelbar h3 { font-family:"SF Pro Rounded"; font-size:26px; }
+      .panelbar p { margin-top:5px; font-size:17px; color:var(--muted); }
+      .technical { font-size:17px; letter-spacing:.12em; text-transform:uppercase; color:#aebed1; }
+      .field { position:relative; overflow:hidden; background:#080b11; }
+      .field img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; filter:saturate(.72) brightness(.72) contrast(1.08); }
+      .field-light { position:absolute; z-index:1; top:-25%; bottom:-25%; left:-45%; width:42%; background:linear-gradient(90deg,transparent,rgba(255,255,255,.46),rgba(94,234,212,.2),transparent); filter:blur(20px); opacity:0; transform:skewX(-12deg); mix-blend-mode:screen; pointer-events:none; }
+      .field::after { content:""; position:absolute; inset:0; box-shadow:inset 0 0 70px rgba(0,0,0,.55); pointer-events:none; }
+      .path-svg { position:absolute; z-index:2; inset:0; width:100%; height:100%; overflow:visible; }
+      .path-shadow { fill:none; stroke:rgba(9,13,20,.9); stroke-width:14; stroke-linecap:round; stroke-linejoin:round; }
+      .path-main { fill:none; stroke:var(--accent); stroke-width:7; stroke-linecap:round; stroke-linejoin:round; filter:drop-shadow(0 0 10px rgba(94,234,212,.75)); }
+      .constraint { fill:none; stroke:var(--warn); stroke-width:15; stroke-linecap:round; opacity:.9; }
+      .waypoint { position:absolute; width:52px; height:52px; margin:-26px 0 0 -26px; border:4px solid var(--accent2); border-radius:13px; background:rgba(56,189,248,.25); color:#d7f3ff; display:grid; place-items:center; font-family:"SF Pro Rounded"; font-size:21px; box-shadow:0 0 0 8px rgba(56,189,248,.10), 0 0 26px rgba(56,189,248,.28); }
+      .waypoint::after { content:""; position:absolute; width:24px; height:4px; right:-17px; top:6px; background:var(--accent2); transform:rotate(-32deg); border-radius:99px; }
+      .event-dot { position:absolute; width:24px; height:24px; margin:-12px; border-radius:50%; background:var(--warn); border:4px solid #302a0a; box-shadow:0 0 20px rgba(250,204,21,.7); }
+      .rotation-target { position:absolute; width:58px; height:58px; margin:-29px; border:4px dashed var(--danger); border-radius:50%; display:grid; place-items:center; background:rgba(251,113,133,.16); color:#ffd5dd; font-family:"SF Pro Rounded"; font-size:18px; }
+      .pill { display:inline-flex; align-items:center; gap:10px; min-height:42px; padding:0 18px; border-radius:999px; border:2px solid rgba(148,163,184,.3); background:#172033; color:#dce7f5; font-size:17px; }
+      .dot { width:11px; height:11px; border-radius:50%; background:var(--danger); box-shadow:0 0 16px currentColor; }
+      .button { min-height:48px; padding:0 22px; border-radius:12px; border:2px solid rgba(94,234,212,.5); background:rgba(94,234,212,.14); color:#cafff7; font-family:"SF Pro Rounded"; font-size:18px; display:inline-flex; align-items:center; justify-content:center; }
+      .corner { position:absolute; width:72px; height:72px; border-color:rgba(94,234,212,.5); }
+      .corner.tl { left:36px; top:36px; border-left:2px solid; border-top:2px solid; }
+      .corner.br { right:36px; bottom:36px; border-right:2px solid; border-bottom:2px solid; }
+      #transition-beam { position:absolute; z-index:50; top:-10%; left:-700px; width:680px; height:120%; opacity:0; pointer-events:none; transform:skewX(-13deg); background:linear-gradient(90deg,transparent,rgba(255,255,255,.18),rgba(255,255,255,.92),rgba(94,234,212,.36),transparent); filter:blur(18px); mix-blend-mode:screen; }
+
+      /* Scene 1 */
+      #s1-copy { position:absolute; left:100px; top:245px; width:720px; z-index:5; }
+      #s1-copy h1 { font-size:104px; }
+      #s1-copy h1 span { color:var(--accent); }
+      #s1-copy p { margin-top:34px; width:580px; color:#b9c7d8; font-size:29px; line-height:1.35; }
+      #s1-field { position:absolute; right:-80px; top:200px; width:1100px; height:670px; transform:perspective(1500px) rotateY(-8deg) rotateX(2deg); }
+      #s1-scan { position:absolute; left:0; right:0; top:0; height:5px; background:var(--accent); box-shadow:0 0 32px 10px rgba(94,234,212,.48); z-index:8; }
+      #s1-path { stroke-dasharray:1000; stroke-dashoffset:1000; }
+
+      /* Scene 2 */
+      #s2-app { position:absolute; left:64px; right:64px; top:118px; bottom:66px; }
+      #s2-body { position:absolute; inset:76px 0 0 0; display:grid; grid-template-columns:1fr 370px; }
+      #s2-field { min-width:0; position:relative; }
+      #s2-side { padding:32px 28px; border-left:2px solid rgba(148,163,184,.18); background:#0c121d; }
+      .side-title { font-family:"SF Pro Rounded"; font-size:25px; margin-bottom:24px; }
+      .side-row { padding:18px 0; border-top:1px solid rgba(148,163,184,.2); display:flex; align-items:center; justify-content:space-between; gap:16px; font-size:18px; color:#bdcada; }
+      .side-row strong { color:var(--text); font-weight:600; }
+      .swatch { width:14px; height:14px; border-radius:4px; background:var(--accent); box-shadow:0 0 14px rgba(94,234,212,.5); }
+      #s2-path, #s2-path-shadow { stroke-dasharray:1200; stroke-dashoffset:1200; }
+
+      /* Scene 3 */
+      #s3-title { position:absolute; left:76px; top:106px; z-index:6; }
+      #s3-title h2 { font-size:70px; }
+      #s3-layout { position:absolute; left:68px; right:68px; top:225px; bottom:70px; display:grid; grid-template-columns:760px 1fr; gap:34px; }
+      #s3-field-panel { position:relative; }
+      #s3-field-panel .field { position:absolute; inset:0; }
+      #tree-panel { position:relative; padding:38px; background:rgba(15,21,33,.97); }
+      .tree-label { position:absolute; left:34px; top:26px; }
+      .tree-node { position:absolute; width:220px; height:80px; border:2px solid rgba(148,163,184,.45); border-radius:14px; background:#121a2a; padding:15px 18px; box-shadow:0 16px 32px rgba(0,0,0,.3); }
+      .tree-node strong { display:block; font-family:"SF Pro Rounded"; font-size:20px; white-space:nowrap; }
+      .tree-node span { display:block; margin-top:6px; color:var(--muted); font-size:14px; text-transform:uppercase; letter-spacing:.08em; }
+      .tree-node.path { border-color:rgba(94,234,212,.65); }
+      .tree-node.if { border-radius:24px 8px 24px 8px; border-color:rgba(56,189,248,.75); }
+      .tree-node.loop { border-style:dashed; border-color:rgba(250,204,21,.7); }
+      .tree-node.event { border-color:rgba(134,239,172,.65); }
+      .tree-node.interrupt { border-color:rgba(251,113,133,.68); }
+      #tree-lines { position:absolute; inset:0; width:100%; height:100%; }
+      #tree-lines path { fill:none; stroke:#5eead4; stroke-width:4; opacity:.75; stroke-dasharray:520; stroke-dashoffset:520; }
+
+      /* Scene 4 */
+      #s4-copy { position:absolute; left:90px; top:125px; width:650px; z-index:5; }
+      #s4-copy h2 { font-size:82px; }
+      #s4-copy p { margin-top:22px; font-size:28px; color:#b8c7d9; line-height:1.4; }
+      #s4-panel { position:absolute; left:770px; right:70px; top:105px; bottom:70px; }
+      #s4-field { position:absolute; inset:76px 0 0 0; }
+      #s4-route { stroke-dasharray:1000; stroke-dashoffset:0; opacity:.6; }
+      #live-robot { position:absolute; left:0; top:0; width:82px; height:66px; border:4px solid var(--accent2); border-radius:15px; background:rgba(56,189,248,.32); display:grid; place-items:center; color:#dff6ff; font-family:"SF Pro Rounded"; font-size:17px; box-shadow:0 0 32px rgba(56,189,248,.52); z-index:6; }
+      #live-robot::after { content:""; position:absolute; right:-19px; width:25px; height:5px; border-radius:9px; background:var(--accent2); }
+      #publish-wrap { position:absolute; left:92px; top:530px; display:flex; align-items:center; gap:20px; }
+      #publish-button { position:relative; min-width:240px; min-height:64px; font-size:22px; }
+      #cursor { position:absolute; width:34px; height:45px; left:250px; top:60px; filter:drop-shadow(0 8px 10px rgba(0,0,0,.55)); }
+      #cursor svg { width:100%; height:100%; }
+      #click-ring { position:absolute; width:72px; height:72px; left:76px; top:-4px; border:4px solid var(--accent); border-radius:50%; opacity:0; }
+
+      /* Scene 5 */
+      #s5-center { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; }
+      #s5-symbol-wrap { position:relative; width:190px; height:190px; margin-bottom:32px; }
+      #s5-white-ring, #s5-logo { position:absolute; inset:0; width:190px; height:190px; transform-origin:center; }
+      #s5-white-ring { border:18px solid #f7fbff; border-top-color:rgba(247,251,255,.08); border-right-color:#5eead4; border-radius:50%; box-shadow:0 0 24px rgba(255,255,255,.85),0 0 80px rgba(94,234,212,.42),inset 0 0 24px rgba(255,255,255,.4); }
+      #s5-white-ring::after { content:""; position:absolute; inset:28px; border:4px solid rgba(255,255,255,.82); border-left-color:transparent; border-radius:50%; }
+      #s5-logo { object-fit:contain; border-radius:50%; opacity:0; filter:drop-shadow(0 0 38px rgba(94,234,212,.44)); }
+      #s5-title { font-family:"SF Pro Rounded"; font-size:154px; line-height:.88; letter-spacing:-.035em; }
+      #s5-tag { margin-top:42px; font-size:32px; color:#c3d0df; letter-spacing:.01em; }
+      #s5-tag span { color:var(--accent); }
+      #s5-meta { margin-top:36px; padding-top:22px; width:620px; border-top:2px solid rgba(94,234,212,.42); font-size:18px; color:#aebdd0; letter-spacing:.15em; text-transform:uppercase; }
+      #s5-orbit { position:absolute; width:620px; height:620px; border:2px solid rgba(94,234,212,.15); border-radius:50%; }
+      #s5-orbit::before, #s5-orbit::after { content:""; position:absolute; inset:72px; border:2px dashed rgba(56,189,248,.12); border-radius:50%; }
+      #s5-orbit::after { inset:150px; border-style:solid; border-color:rgba(94,234,212,.18); }
+    </style>
+  </head>
+  <body>
+    <div data-hf-id="hf-at0g" id="root" data-composition-id="main" data-start="0" data-duration="20" data-width="1920" data-height="1080">
+      <section data-hf-id="hf-ho5g" id="scene-1" class="clip" data-start="0" data-duration="3.2" data-track-index="1">
+        <div data-hf-id="hf-8rns" class="scene-bg"></div><div data-hf-id="hf-kxq8" class="grid"></div><div data-hf-id="hf-h60x" class="grain"></div><div data-hf-id="hf-9co5" class="corner tl"></div><div data-hf-id="hf-34pp" class="corner br"></div>
+        <div data-hf-id="hf-r0xm" class="topmeta"><div data-hf-id="hf-r41q" class="brand-mini"><span data-hf-id="hf-jq1g" class="vmark">V</span>Voyager</div><span data-hf-id="hf-ftf1">FRC AUTONOMY · VISUALIZED</span></div>
+        <div data-hf-id="hf-ecdf" id="poem-1" class="poem-line">Every path begins in the dark.</div>
+        <div data-hf-id="hf-5js1" id="s1-copy" data-layout-allow-overflow><div data-hf-id="hf-4jat" class="eyebrow">Mission planning, made tangible</div><h1 data-hf-id="hf-y5n4" class="headline">Autonomy should be <span data-hf-id="hf-x49l">visible.</span></h1><p data-hf-id="hf-hrsp">See the route. Shape the behavior. Know what the robot will do.</p></div>
+        <div data-hf-id="hf-9uq2" id="s1-field" class="panel field" data-layout-allow-overflow="">
+          <img data-hf-id="hf-dip1" src="assets/images/frc-2026-field-s1.png" alt="2026 FRC playing field"><div data-hf-id="hf-yr7u" id="s1-light" class="field-light"></div>
+          <div data-hf-id="hf-p409" id="s1-scan"></div>
+          <svg data-hf-id="hf-nub0" class="path-svg" viewBox="0 0 1100 670" aria-hidden="true"><path data-hf-id="hf-fn2x" id="s1-path" class="path-main" d="M 90 520 C 240 480, 310 405, 420 390 S 640 450, 735 315 S 870 170, 1010 125" /></svg>
+        </div>
+      </section>
+
+      <section data-hf-id="hf-812x" id="scene-2" class="clip" data-start="3.2" data-duration="4" data-track-index="1">
+        <div data-hf-id="hf-mhds" class="scene-bg"></div><div data-hf-id="hf-6qwo" class="grid"></div><div data-hf-id="hf-3l5h" class="grain"></div>
+        <div data-hf-id="hf-15we" class="topmeta"><div data-hf-id="hf-0nxe" class="brand-mini"><span data-hf-id="hf-qy0c" class="vmark">V</span>Voyager</div><span data-hf-id="hf-mhxh">01 / BUILD THE ROUTE</span></div>
+        <div data-hf-id="hf-byj3" id="poem-2" class="poem-line" data-layout-allow-overflow>Then one point becomes a direction.</div>
+        <div data-hf-id="hf-lsl1" id="s2-app" class="panel">
+          <div data-hf-id="hf-7cwl" class="panelbar"><div data-hf-id="hf-yeow"><h3 data-hf-id="hf-qdyb">Auto maker field</h3><p data-hf-id="hf-exf1">Editing Centerline_Sprint</p></div><div data-hf-id="hf-2dbo" style="display:flex;gap:12px"><span data-hf-id="hf-fj5n" class="pill">Waypoint</span><span data-hf-id="hf-rtdo" class="button">Add</span></div></div>
+          <div data-hf-id="hf-jsw7" id="s2-body">
+            <div data-hf-id="hf-vcam" id="s2-field" class="field" data-layout-allow-overflow="" data-layout-allow-overlap="">
+              <img data-hf-id="hf-s4pk" src="assets/images/frc-2026-field-s2.png" alt="2026 FRC field in Voyager route editor"><div data-hf-id="hf-miy1" id="s2-light" class="field-light"></div>
+              <svg data-hf-id="hf-6f0w" class="path-svg" viewBox="0 0 1422 730" aria-hidden="true">
+                <path data-hf-id="hf-vm1k" id="s2-path-shadow" class="path-shadow" d="M 110 570 C 260 500, 390 585, 520 455 S 765 360, 880 280 S 1120 205, 1310 125" />
+                <path data-hf-id="hf-ogq5" id="s2-constraint" class="constraint" d="M 495 475 C 560 415, 620 380, 705 365" />
+                <path data-hf-id="hf-f4oy" id="s2-path" class="path-main" d="M 110 570 C 260 500, 390 585, 520 455 S 765 360, 880 280 S 1120 205, 1310 125" />
+              </svg>
+              <div data-hf-id="hf-qry5" class="waypoint s2-waypoint" style="left:8%;top:78%">1</div><div data-hf-id="hf-kzxz" class="waypoint s2-waypoint" style="left:36.5%;top:62%">2</div><div data-hf-id="hf-x5kk" class="waypoint s2-waypoint" style="left:61.8%;top:38%">3</div><div data-hf-id="hf-d260" class="waypoint s2-waypoint" style="left:92%;top:17%">4</div>
+              <div data-hf-id="hf-9dne" id="s2-rt" class="rotation-target" style="left:62%;top:38%">RT</div><div data-hf-id="hf-o7sw" id="s2-event" class="event-dot" style="left:77%;top:29%"></div>
+            </div>
+            <aside data-hf-id="hf-ebet" id="s2-side"><div data-hf-id="hf-uulc" class="side-title">Path elements</div><div data-hf-id="hf-yl4a" class="side-row"><span data-hf-id="hf-2swm">Waypoint</span><strong data-hf-id="hf-df2y">4</strong></div><div data-hf-id="hf-31gu" class="side-row"><span data-hf-id="hf-z370">Rotation Target</span><span data-hf-id="hf-yxs2" class="swatch" style="background:var(--danger)"></span></div><div data-hf-id="hf-3frv" class="side-row"><span data-hf-id="hf-miqv">Event Trigger</span><span data-hf-id="hf-rcqd" class="swatch" style="background:var(--warn)"></span></div><div data-hf-id="hf-3u2w" class="side-row"><span data-hf-id="hf-ajxg">Constraint Zone</span><span data-hf-id="hf-3ucp" class="swatch" style="background:var(--warn)"></span></div><div data-hf-id="hf-11xp" class="side-row"><span data-hf-id="hf-bczu">Path length</span><strong data-hf-id="hf-cyil">11.84 m</strong></div></aside>
+          </div>
+        </div>
+      </section>
+
+      <section data-hf-id="hf-5yn9" id="scene-3" class="clip" data-start="7.2" data-duration="4.1" data-track-index="1">
+        <div data-hf-id="hf-lagp" class="scene-bg"></div><div data-hf-id="hf-5jzl" class="grid"></div><div data-hf-id="hf-4s2k" class="grain"></div>
+        <div data-hf-id="hf-1k7f" class="topmeta"><div data-hf-id="hf-128f" class="brand-mini"><span data-hf-id="hf-pr39" class="vmark">V</span>Voyager</div><span data-hf-id="hf-b19z">02 / BRANCH THE LOGIC</span></div>
+        <div data-hf-id="hf-zo4p" id="poem-3" class="poem-line">A direction becomes a choice.</div>
+        <div data-hf-id="hf-hfg2" id="s3-title"><div data-hf-id="hf-igee" class="eyebrow">Not a sequence. A system.</div><h2 data-hf-id="hf-t15s" class="headline">Branch the logic.</h2></div>
+        <div data-hf-id="hf-htre" id="s3-layout">
+          <div data-hf-id="hf-mfgw" id="s3-field-panel" class="panel"><div data-hf-id="hf-0ztw" class="field"><img data-hf-id="hf-zslh" src="assets/images/frc-2026-field-s3.png" alt="Completed Voyager field path"><div data-hf-id="hf-1fvs" id="s3-light" class="field-light"></div><svg data-hf-id="hf-ajpv" class="path-svg" viewBox="0 0 760 715" aria-hidden="true"><path data-hf-id="hf-qdp6" class="path-shadow" d="M 70 570 C 180 500 235 555 315 455 S 455 345 530 275 S 640 190 710 125" /><path data-hf-id="hf-1b9n" class="path-main" d="M 70 570 C 180 500 235 555 315 455 S 455 345 530 275 S 640 190 710 125" /></svg></div></div>
+          <div data-hf-id="hf-2tjp" id="tree-panel" class="panel"><span data-hf-id="hf-aec9" class="tree-label technical">Path tree · Centerline Auto</span>
+            <svg data-hf-id="hf-4gnp" id="tree-lines" viewBox="0 0 992 715" aria-hidden="true"><path data-hf-id="hf-3zsd" id="tree-line-1" d="M 240 200 C 330 200, 330 315, 420 315" /><path data-hf-id="hf-6ibq" id="tree-line-2" d="M 610 315 C 680 315, 660 180, 748 180" /><path data-hf-id="hf-8183" id="tree-line-3" d="M 610 315 C 680 315, 660 450, 748 450" /><path data-hf-id="hf-ksk0" id="tree-line-4" d="M 240 200 C 300 200, 300 545, 420 545" /></svg>
+            <div data-hf-id="hf-qvqn" id="node-path" class="tree-node path" style="left:52px;top:160px"><strong data-hf-id="hf-poza">Centerline_Sprint</strong><span data-hf-id="hf-ta8b">path block</span></div>
+            <div data-hf-id="hf-3ggf" id="node-if" class="tree-node if" style="left:420px;top:275px"><strong data-hf-id="hf-lztn">Has game piece?</strong><span data-hf-id="hf-xyqm">if branch</span></div>
+            <div data-hf-id="hf-1ie5" id="node-event" class="tree-node event" style="left:748px;top:140px"><strong data-hf-id="hf-p0gi">Score L2</strong><span data-hf-id="hf-mng6">event block</span></div>
+            <div data-hf-id="hf-7txh" id="node-loop" class="tree-node loop" style="left:748px;top:410px"><strong data-hf-id="hf-1pae">Acquire Again</strong><span data-hf-id="hf-85i2">loop block</span></div>
+            <div data-hf-id="hf-uvdx" id="node-interrupt" class="tree-node interrupt" style="left:420px;top:505px"><strong data-hf-id="hf-9z8e">Vision Override</strong><span data-hf-id="hf-rc5g">interruptable</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section data-hf-id="hf-0vro" id="scene-4" class="clip" data-start="11.3" data-duration="4.1" data-track-index="1">
+        <div data-hf-id="hf-lorq" class="scene-bg"></div><div data-hf-id="hf-5yam" class="grid"></div><div data-hf-id="hf-4drj" class="grain"></div><div data-hf-id="hf-bfll" class="corner tl"></div><div data-hf-id="hf-ong1" class="corner br"></div>
+        <div data-hf-id="hf-1yig" class="topmeta"><div data-hf-id="hf-1gjg" class="brand-mini"><span data-hf-id="hf-q5ea" class="vmark">V</span>Voyager</div><span data-hf-id="hf-gsl7">03 / SEE IT LIVE</span></div>
+        <div data-hf-id="hf-sdbj" id="poem-4" class="poem-line">And the choice becomes motion.</div>
+        <div data-hf-id="hf-hzle" id="s4-copy" data-layout-allow-overflow><div data-hf-id="hf-60t0" class="eyebrow">NT4 live feedback</div><h2 data-hf-id="hf-0yms" class="headline">Plan it.<br data-hf-id="hf-x5px">Then watch it happen.</h2><p data-hf-id="hf-vmpb">Planned waypoints and live robot position share the same field.</p><div data-hf-id="hf-k13n" id="publish-wrap"><div data-hf-id="hf-mmq3" id="publish-button" class="button">Publish Routine<div data-hf-id="hf-fvkq" id="click-ring"></div></div><div data-hf-id="hf-8gdj" id="cursor"><svg data-hf-id="hf-41o5" viewBox="0 0 40 52" aria-hidden="true"><path data-hf-id="hf-r4si" d="M4 2 L34 33 L21 35 L28 49 L19 52 L12 38 L3 47 Z" fill="#e5ecf7" stroke="#090d14" stroke-width="3" /></svg></div></div></div>
+        <div data-hf-id="hf-1fys" id="s4-panel" class="panel"><div data-hf-id="hf-8qx5" class="panelbar"><div data-hf-id="hf-y7yw"><h3 data-hf-id="hf-erw5">Live robot position</h3><p data-hf-id="hf-2sio" id="connection-copy">Robot disconnected — showing origin</p></div><div data-hf-id="hf-dfey" style="display:flex;gap:12px;align-items:center"><span data-hf-id="hf-2jz2" id="connection-pill" class="pill"><i data-hf-id="hf-6bgx" class="dot"></i><span data-hf-id="hf-vmsh" id="connection-state">offline</span></span></div></div><div data-hf-id="hf-9xk0" id="s4-field" class="field"><img data-hf-id="hf-54ei" src="assets/images/frc-2026-field-s4.png" alt="Live robot position on FRC field"><div data-hf-id="hf-ochb" id="s4-light" class="field-light"></div><svg data-hf-id="hf-w2zz" class="path-svg" viewBox="0 0 1080 799" aria-hidden="true"><path data-hf-id="hf-84jw" id="s4-route" class="path-main" d="M 90 635 C 225 580 350 645 440 505 S 650 400 760 300 S 920 205 1010 145" /></svg><div data-hf-id="hf-pans" id="live-robot">robot</div></div></div>
+      </section>
+
+      <section data-hf-id="hf-yuc1" id="scene-5" class="clip" data-start="15.4" data-duration="4.6" data-track-index="1">
+        <div data-hf-id="hf-khun" class="scene-bg"></div><div data-hf-id="hf-4rdj" class="grid"></div><div data-hf-id="hf-5kom" class="grain"></div><div data-hf-id="hf-cmio" class="corner tl"></div><div data-hf-id="hf-pud4" class="corner br"></div>
+        <div data-hf-id="hf-ttvh" id="poem-5" class="poem-line" data-layout-allow-overlap data-layout-allow-overflow>Until the machine remembers.</div>
+        <div data-hf-id="hf-1z9h" id="s5-center" data-layout-allow-overlap data-layout-allow-overflow><div data-hf-id="hf-jie6" id="s5-orbit"></div><div data-hf-id="hf-dd9j" id="s5-symbol-wrap"><div data-hf-id="hf-w5vo" id="s5-white-ring"></div><img data-hf-id="hf-osxv" id="s5-logo" src="assets/images/voyager-logo.png" alt="Voyager logo"></div><h2 data-hf-id="hf-pw5u" id="s5-title">VOYAGER</h2><p data-hf-id="hf-t3ut" id="s5-tag">Build the route. <span data-hf-id="hf-aa5e">Branch the logic.</span> Ship the auto.</p><div data-hf-id="hf-a23p" id="s5-meta">Open source · FRC autonomous builder</div></div>
+      </section>
+
+      <div data-hf-id="hf-yhps" id="transition-beam"></div>
+
+      <audio data-hf-id="hf-1i8v" id="music" class="clip" data-start="0" data-duration="20" data-track-index="10" data-volume="0.48" src="assets/music/voyager-piano.mp3"></audio>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const energy = [0.0085,0.15,0.2363,0.3455,0.5792,0.6002,0.5584,0.6725,0.5853,0.5692,0.5008,0.4517,0.437,0.6289,0.6996,0.5862,0.5329,0.4936,1,0.8206,0.6099,0.4159,0.4114,0.4825,0.445,0.508,0.5039,0.4561,0.258,0.3184,0.2874,0.2711,0.3747,0.4608,0.4634,0.2279,0.3878,0.4806,0.8076,0.6861,0.7179,0.6563,0.7061,0.517,0.5139,0.8704,0.5837,0.5108,0.361,0.3011,0.4386,0.5877,0.3951,0.599,0.7606,0.8548,0.8525,0.5647,0.5364,0.6628,0.7548,0.6871,0.558,0.4688,0.4784,0.3502,0.5423,0.3939,0.4778,0.4704,0.5327,0.4083,0.3053,0.2309,0.115];
+      const tl = gsap.timeline({ paused:true, onUpdate:() => { const i = Math.min(energy.length - 1, Math.max(0, Math.floor(tl.time() * 4))); document.documentElement.style.setProperty("--energy", energy[i]); } });
+      tl.from("#s1-field", { x:360, opacity:0, scale:.92, duration:.85, ease:"power3.out" }, 0)
+        .fromTo("#poem-1", { x:-1000, opacity:0 }, { x:0, opacity:1, duration:.68, ease:"power4.out" }, .05)
+        .to("#poem-1", { x:720, opacity:0, duration:.58, ease:"power3.in" }, .86)
+        .set("#poem-1", { opacity:0 }, 1.44)
+        .from("#s1-copy .eyebrow", { x:900, opacity:0, duration:.7, ease:"power4.out" }, .62)
+        .from("#s1-copy h1", { x:-900, opacity:0, scale:.94, color:"#5c6c81", duration:1, ease:"power4.out" }, .82)
+        .from("#s1-copy p", { x:-420, opacity:0, duration:.72, ease:"power3.out" }, 1.4)
+        .fromTo("#s1-scan", { y:0, opacity:0 }, { y:660, opacity:1, duration:1.5, ease:"power2.inOut" }, .15)
+        .fromTo("#s1-light", { x:-220, opacity:0 }, { x:1550, opacity:.88, duration:1.65, ease:"power2.inOut" }, .48)
+        .to("#s1-light", { opacity:0, duration:.28, ease:"power2.out" }, 2.13)
+        .set("#s1-light", { opacity:0 }, 2.41)
+        .to("#s1-path", { strokeDashoffset:0, duration:1.45, ease:"power2.inOut" }, 1.15)
+        .to("#s1-copy h1", { x:520, opacity:0, color:"#ffffff", duration:.58, ease:"power3.in" }, 2.36)
+        .to("#s1-copy p", { x:-300, opacity:0, duration:.46, ease:"power2.in" }, 2.34)
+        .to("#s1-copy .eyebrow", { x:-340, opacity:0, duration:.42, ease:"power2.in" }, 2.28)
+        .to("#s1-field", { scale:1.035, x:-35, duration:1.1, ease:"sine.inOut" }, 1.8)
+        .fromTo("#transition-beam", { x:-100, opacity:0 }, { x:1150, opacity:.94, duration:.18, ease:"power3.in" }, 2.95)
+        .to("#transition-beam", { x:2450, opacity:0, duration:.19, ease:"power3.out" }, 3.14)
+        .set("#transition-beam", { opacity:0 }, 3.33);
+
+      tl.from("#s2-app", { y:120, opacity:0, scale:.97, duration:.55, ease:"power3.out" }, 3.2)
+        .fromTo("#poem-2", { x:1100, opacity:0 }, { x:0, opacity:1, duration:.74, ease:"power4.out" }, 3.22)
+        .to("#poem-2", { x:-950, opacity:0, duration:.62, ease:"power3.in" }, 4.34)
+        .set("#poem-2", { opacity:0 }, 4.96)
+        .from("#s2-app .panelbar h3", { x:-620, opacity:0, color:"#5c6c81", duration:.78, ease:"power4.out" }, 4.28)
+        .to(["#s2-path-shadow","#s2-path"], { strokeDashoffset:0, duration:1.45, ease:"power2.inOut" }, 3.55)
+        .fromTo("#s2-light", { x:-220, opacity:0 }, { x:1750, opacity:.82, duration:1.55, ease:"power2.inOut" }, 3.55)
+        .to("#s2-light", { opacity:0, duration:.25 }, 5.1)
+        .set("#s2-light", { opacity:0 }, 5.35)
+        .from("#s2-side", { x:130, opacity:0, duration:.48, ease:"power3.out" }, 3.72)
+        .from("#s2-side .side-row", { x:32, opacity:0, duration:.34, stagger:.18, ease:"power2.out" }, 4.0)
+        .from(".s2-waypoint", { scale:0, opacity:0, rotation:-20, duration:.42, stagger:.52, ease:"back.out(1.9)" }, 4.39)
+        .from("#s2-constraint", { opacity:0, scale:.75, transformOrigin:"center", duration:.5, ease:"power2.out" }, 5.35)
+        .from("#s2-rt", { scale:0, opacity:0, rotation:-90, duration:.46, ease:"back.out(1.7)" }, 5.85)
+        .from("#s2-event", { scale:0, opacity:0, duration:.38, ease:"back.out(2.2)" }, 6.22)
+        .to("#s2-app .panelbar h3", { x:240, opacity:.15, color:"#ffffff", duration:.62, ease:"power3.in" }, 6.38)
+        .fromTo("#transition-beam", { x:-100, opacity:0 }, { x:1150, opacity:.92, duration:.18, ease:"power3.in", immediateRender:false }, 6.94)
+        .to("#transition-beam", { x:2450, opacity:0, duration:.2, ease:"power3.out" }, 7.12)
+        .set("#transition-beam", { opacity:0 }, 7.32);
+
+      tl.fromTo("#poem-3", { x:-1100, opacity:0 }, { x:0, opacity:1, duration:.76, ease:"power4.out" }, 7.22)
+        .to("#poem-3", { x:900, opacity:0, duration:.64, ease:"power3.in" }, 8.38)
+        .set("#poem-3", { opacity:0 }, 9.02)
+        .from("#s3-title", { x:980, opacity:0, color:"#5c6c81", duration:.78, ease:"power4.out" }, 8.12)
+        .from("#s3-field-panel", { x:-180, opacity:0, rotationY:8, duration:.65, ease:"power3.out" }, 7.35)
+        .from("#tree-panel", { x:220, opacity:0, rotationY:-7, duration:.65, ease:"power3.out" }, 7.48)
+        .fromTo("#s3-light", { x:-220, opacity:0 }, { x:1050, opacity:.84, duration:1.25, ease:"power2.inOut" }, 8.02)
+        .to("#s3-light", { opacity:0, duration:.25 }, 9.27)
+        .set("#s3-light", { opacity:0 }, 9.52)
+        .from("#node-path", { scale:0, opacity:0, duration:.42, ease:"back.out(1.8)" }, 7.9)
+        .to("#tree-line-1", { strokeDashoffset:0, duration:.48, ease:"power2.out" }, 8.22)
+        .from("#node-if", { scale:0, opacity:0, duration:.42, ease:"back.out(1.8)" }, 8.42)
+        .to(["#tree-line-2","#tree-line-3","#tree-line-4"], { strokeDashoffset:0, duration:.62, stagger:.12, ease:"power2.out" }, 8.74) // beat-locked: 8.74s
+        .from(["#node-event","#node-loop","#node-interrupt"], { scale:0, opacity:0, y:24, duration:.44, stagger:.23, ease:"back.out(1.7)" }, 9.02)
+        .to("#s3-title", { x:-620, opacity:0, duration:.68, ease:"power3.in" }, 10.28)
+        .to("#tree-panel", { scale:1.018, duration:.34, ease:"sine.inOut", yoyo:true, repeat:1 }, 9.82)
+        .fromTo("#transition-beam", { x:-100, opacity:0 }, { x:1150, opacity:.94, duration:.18, ease:"power3.in", immediateRender:false }, 11.02)
+        .to("#transition-beam", { x:2450, opacity:0, duration:.2, ease:"power3.out" }, 11.2)
+        .set("#transition-beam", { opacity:0 }, 11.4);
+
+      tl.fromTo("#poem-4", { x:1100, opacity:0 }, { x:0, opacity:1, duration:.76, ease:"power4.out" }, 11.32)
+        .to("#poem-4", { x:-900, opacity:0, duration:.64, ease:"power3.in" }, 12.5)
+        .set("#poem-4", { opacity:0 }, 13.14)
+        .from("#s4-copy", { x:-980, opacity:0, color:"#5c6c81", duration:.86, ease:"power4.out" }, 12.08)
+        .from("#s4-panel", { x:180, opacity:0, scale:.97, duration:.65, ease:"power3.out" }, 11.38)
+        .fromTo("#s4-light", { x:-220, opacity:0 }, { x:1450, opacity:.86, duration:1.45, ease:"power2.inOut" }, 11.92)
+        .to("#s4-light", { opacity:0, duration:.25 }, 13.37)
+        .set("#s4-light", { opacity:0 }, 13.62)
+        .fromTo("#live-robot", { x:58, y:610, rotation:-8 }, { keyframes:[{x:265,y:550,rotation:8,duration:.65},{x:445,y:430,rotation:-5,duration:.65},{x:690,y:285,rotation:-10,duration:.72},{x:920,y:120,rotation:-16,duration:.73}], ease:"none" }, 11.72)
+        .to("#connection-pill .dot", { backgroundColor:"#86efac", scale:1.25, duration:.2, ease:"power2.out" }, 13.11) // beat-locked: 13.11s
+        .to("#connection-pill", { borderColor:"rgba(134,239,172,.65)", backgroundColor:"rgba(134,239,172,.12)", duration:.3 }, 13.11)
+        .to("#connection-state", { innerText:"connected", duration:.01, ease:"none" }, 13.11)
+        .to("#connection-copy", { innerText:"Robot connected", duration:.01, ease:"none" }, 13.11)
+        .from("#publish-wrap", { y:42, opacity:0, duration:.45, ease:"power2.out" }, 13.5)
+        .to("#cursor", { x:-195, y:-52, duration:.65, ease:"power2.inOut" }, 14.05)
+        .to(["#publish-button","#cursor"], { scale:.92, duration:.11, ease:"none" }, 14.91)
+        .to(["#publish-button","#cursor"], { scale:1, duration:.2, ease:"back.out(2.4)" }, 15.02)
+        .fromTo("#click-ring", { scale:.2, opacity:.8 }, { scale:1.35, opacity:0, duration:.35, ease:"power2.out" }, 14.95)
+        .set("#click-ring", { opacity:0 }, 15.3)
+        .to("#s4-copy h2", { x:160, opacity:.18, color:"#ffffff", duration:.72, ease:"power3.in" }, 14.48)
+        .to("#s4-copy p", { x:-220, opacity:0, duration:.58, ease:"power2.in" }, 14.4)
+        .fromTo("#transition-beam", { x:-100, opacity:0 }, { x:1150, opacity:.98, duration:.18, ease:"power3.in", immediateRender:false }, 15.2)
+        .to("#transition-beam", { x:2450, opacity:0, duration:.2, ease:"power3.out" }, 15.38)
+        .set("#transition-beam", { opacity:0 }, 15.58);
+
+      tl.from("#s5-orbit", { scale:.4, opacity:0, rotation:-35, duration:.6, ease:"power3.out" }, 15.4)
+        .fromTo("#poem-5", { x:-950, opacity:0 }, { x:0, opacity:1, duration:.78, ease:"power4.out" }, 15.42)
+        .to("#poem-5", { x:780, y:-38, opacity:0, duration:.68, ease:"power3.in" }, 16.36)
+        .set("#poem-5", { opacity:0 }, 17.04)
+        .to("#s5-orbit", { rotation:35, duration:4, ease:"none" }, 16.0)
+        .from("#s5-white-ring", { scale:.2, opacity:0, rotation:-180, duration:.42, ease:"back.out(1.8)" }, 15.4)
+        .to("#s5-white-ring", { rotation:720, scale:1.08, duration:1.05, ease:"power2.inOut" }, 15.82)
+        .to("#s5-white-ring", { scale:.68, opacity:0, duration:.4, ease:"power2.in" }, 16.87)
+        .fromTo("#s5-logo", { scale:.62, opacity:0, rotation:-30 }, { scale:1, opacity:1, rotation:0, duration:.47, ease:"back.out(1.65)" }, 17.0)
+        .from("#s5-title", { x:-1000, y:42, opacity:0, scale:.9, color:"#5c6c81", duration:.72, ease:"power4.out" }, 17.18)
+        .from("#s5-tag", { x:900, y:22, opacity:0, duration:.62, ease:"power4.out" }, 17.83)
+        .from("#s5-meta", { scaleX:0, opacity:0, duration:.5, transformOrigin:"center", ease:"power2.out" }, 18.31)
+        .to("#s5-logo", { scale:1.055, duration:.38, ease:"sine.inOut", yoyo:true, repeat:3 }, 17.47) // beat-locked: 17.47s
+        .to("#s5-title", { x:90, opacity:.72, color:"#ffffff", duration:.72, ease:"power2.in" }, 19.18)
+        .to("#s5-tag", { x:-90, opacity:.55, duration:.68, ease:"power2.in" }, 19.2);
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

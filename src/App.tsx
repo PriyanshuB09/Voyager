@@ -315,6 +315,24 @@ function formatNumber(value: number, digits = 2): string {
   return Number(value.toFixed(digits)).toString();
 }
 
+function normalizeCompassDegrees(degrees: number): number {
+  if (!Number.isFinite(degrees)) return 0;
+  let normalized = ((degrees + 180) % 360 + 360) % 360 - 180;
+  if (Math.abs(normalized + 180) < 0.000001) normalized = 180;
+  if (Math.abs(normalized) < 0.000001) normalized = 0;
+  return normalized;
+}
+
+function pointerToCompassDegrees(pointerX: number, pointerY: number, centerX: number, centerY: number): number {
+  const dx = pointerX - centerX;
+  const dy = centerY - pointerY;
+  return normalizeCompassDegrees((Math.atan2(dy, dx) * 180) / Math.PI);
+}
+
+function compassDegreesToCssRotation(degrees: number): number {
+  return -normalizeCompassDegrees(degrees);
+}
+
 function normalizeNt4AddressInput(rawAddress: string): string | null {
   const cleanedAddress = rawAddress.trim();
 
@@ -756,7 +774,7 @@ function robotRenderStyle(settings: Settings, size: FieldSize, x: number, y: num
     height: `${height}px`,
     left: `${point.x - originX}px`,
     top: `${point.y - originY}px`,
-    transform: `rotate(${angleDegrees}deg)`,
+    transform: `rotate(${compassDegreesToCssRotation(angleDegrees)}deg)`,
     transformOrigin: `${originX}px ${originY}px`,
   };
 }
@@ -777,12 +795,12 @@ function serializePathData(path: SharedPathData): SerializedPathFile {
     waypoints: path.waypoints.map((waypoint) => ({
       x: waypoint.x,
       y: waypoint.y,
-      angle: waypoint.angle,
+      angle: normalizeCompassDegrees(waypoint.angle),
       handoff: waypoint.handoff,
       profiled: waypoint.profiled,
     })),
     rotation_targets: path.rotationTargets.map((target) => ({
-      angle: target.angle,
+      angle: normalizeCompassDegrees(target.angle),
       position: target.position,
     })),
     events: path.events.map((event) => ({
@@ -1539,7 +1557,12 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
 
       const onPointerMove = (moveEvent: PointerEvent): void => {
         const center = pointToPixels(settings, fieldOneSize, waypoint);
-        const angle = (Math.atan2(moveEvent.clientY - (fieldRect.top + center.y), moveEvent.clientX - (fieldRect.left + center.x)) * 180) / Math.PI;
+        const angle = pointerToCompassDegrees(
+          moveEvent.clientX,
+          moveEvent.clientY,
+          fieldRect.left + center.x,
+          fieldRect.top + center.y,
+        );
         updateWaypoint(waypoint.id, { angle: Number(angle.toFixed(2)) });
       };
 
@@ -1569,7 +1592,12 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
 
       const onPointerMove = (moveEvent: PointerEvent): void => {
         const center = pointToPixels(settings, fieldOneSize, point);
-        const angle = (Math.atan2(moveEvent.clientY - (fieldRect.top + center.y), moveEvent.clientX - (fieldRect.left + center.x)) * 180) / Math.PI;
+        const angle = pointerToCompassDegrees(
+          moveEvent.clientX,
+          moveEvent.clientY,
+          fieldRect.left + center.x,
+          fieldRect.top + center.y,
+        );
         updateRotationTarget(target.id, { angle: Number(angle.toFixed(2)) });
       };
 
@@ -2139,7 +2167,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
               </div>
               <div
                 className="robot-marker live-robot-marker"
-                style={robotRenderStyle(settings, fieldTwoSize, livePose.x, livePose.y, (livePose.rotation * 180) / Math.PI)}
+                style={robotRenderStyle(settings, fieldTwoSize, livePose.x, livePose.y, normalizeCompassDegrees((livePose.rotation * 180) / Math.PI))}
               >
                 <span>robot</span>
               </div>
@@ -2535,7 +2563,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
             <div className="modal-body grid-two">
               <label>X (m)<input type="number" step="0.01" value={formatNumber(activeWaypointModal.x, 3)} onChange={(event) => updateWaypoint(activeWaypointModal.id, { x: clamp(cleanNumber(Number(event.target.value), 0), 0, settings.fieldLengthMeters) })} /></label>
               <label>Y (m)<input type="number" step="0.01" value={formatNumber(activeWaypointModal.y, 3)} onChange={(event) => updateWaypoint(activeWaypointModal.id, { y: clamp(cleanNumber(Number(event.target.value), 0), 0, settings.fieldWidthMeters) })} /></label>
-              <label>Rotation (°)<input type="number" step="1" value={formatNumber(activeWaypointModal.angle, 2)} onChange={(event) => updateWaypoint(activeWaypointModal.id, { angle: cleanNumber(Number(event.target.value), 0) })} /></label>
+              <label>Rotation (°)<input type="number" step="1" value={formatNumber(normalizeCompassDegrees(activeWaypointModal.angle), 2)} onChange={(event) => updateWaypoint(activeWaypointModal.id, { angle: normalizeCompassDegrees(cleanNumber(Number(event.target.value), 0)) })} /></label>
               <label>Handoff (m)<input type="number" step="0.01" value={formatNumber(activeWaypointModal.handoff, 3)} onChange={(event) => updateWaypoint(activeWaypointModal.id, { handoff: safePositive(Number(event.target.value), 0.2) })} /></label>
               <label className="checkbox-row"><input type="checkbox" checked={activeWaypointModal.profiled} onChange={(event) => updateWaypoint(activeWaypointModal.id, { profiled: event.target.checked })} />Profiled</label>
               <button className="danger full-button" type="button" onClick={() => deleteWaypoint(activeWaypointModal.id)}>Delete waypoint</button>
@@ -2544,7 +2572,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
 
           {activeRotationTargetModal ? (
             <div className="modal-body">
-              <label>Rotation (°)<input type="number" step="1" value={formatNumber(activeRotationTargetModal.angle, 2)} onChange={(event) => updateRotationTarget(activeRotationTargetModal.id, { angle: cleanNumber(Number(event.target.value), 0) })} /></label>
+              <label>Rotation (°)<input type="number" step="1" value={formatNumber(normalizeCompassDegrees(activeRotationTargetModal.angle), 2)} onChange={(event) => updateRotationTarget(activeRotationTargetModal.id, { angle: normalizeCompassDegrees(cleanNumber(Number(event.target.value), 0)) })} /></label>
               <label>Position: {formatNumber(activeRotationTargetModal.position, 2)}
                 <input type="range" min="0" max={activeMaxPosition} step="0.01" value={activeRotationTargetModal.position} onChange={(event) => updateRotationTarget(activeRotationTargetModal.id, { position: clamp(Number(event.target.value), 0, activeMaxPosition) })} />
               </label>

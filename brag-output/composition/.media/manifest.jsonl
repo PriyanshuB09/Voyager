@@ -1,0 +1,10 @@
+{"id":"image_001","type":"image","path":"assets/images/frc-2026-field.png","source":"existing","description":"frc 2026 field","width":3902,"height":1584,"provenance":{"provider":"local","adopted":true}}
+{"id":"bgm_001","type":"bgm","path":"assets/music/voyager-bed.mp3","source":"existing","description":"voyager bed","duration":117.4,"provenance":{"provider":"local","adopted":true}}
+{"id":"sfx_001","type":"sfx","path":"assets/sfx/click.ogg","source":"existing","description":"click","duration":0,"provenance":{"provider":"local","adopted":true}}
+{"id":"sfx_002","type":"sfx","path":"assets/sfx/connect.ogg","source":"existing","description":"connect","duration":0.1,"provenance":{"provider":"local","adopted":true}}
+{"id":"sfx_003","type":"sfx","path":"assets/sfx/reveal.ogg","source":"existing","description":"reveal","duration":0.2,"provenance":{"provider":"local","adopted":true}}
+{"id":"image_002","type":"image","path":"assets/images/frc-2026-field-s1.png","source":"existing","description":"frc 2026 field s1","width":3902,"height":1584,"provenance":{"provider":"local","adopted":true}}
+{"id":"image_003","type":"image","path":"assets/images/frc-2026-field-s2.png","source":"existing","description":"frc 2026 field s2","width":3902,"height":1584,"provenance":{"provider":"local","adopted":true}}
+{"id":"image_004","type":"image","path":"assets/images/frc-2026-field-s3.png","source":"existing","description":"frc 2026 field s3","width":3902,"height":1584,"provenance":{"provider":"local","adopted":true}}
+{"id":"image_005","type":"image","path":"assets/images/frc-2026-field-s4.png","source":"existing","description":"frc 2026 field s4","width":3902,"height":1584,"provenance":{"provider":"local","adopted":true}}
+{"id":"image_006","type":"image","path":"assets/images/voyager-logo.png","source":"existing","description":"voyager logo","width":1024,"height":1024,"provenance":{"provider":"local","adopted":true}}
