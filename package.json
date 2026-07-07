@@ -3,45 +3,70 @@
   "version": "1.0.0",
   "author": "Priyanshu Biswal",
   "description": "An open-source FIRST Robotics Competition autonomous builder dashboard. Promotes modularity and branching, as well visual graphs and support for object detection deviances.",
-  "main": "electron/main.ts",
+  "main": "out/main/main.js",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"vite\" \"cross-env NODE_ENV=development electron .\"",
-    "build": "vite build && electron-builder build",
-    "dist": "npm run build && electron-builder --win"
-  },
-  "dependencies": {
+  "dev": "electron-vite dev",
+  "build": "electron-vite build",
+  "release": "electron-vite build && electron-builder --win --publish never",
+  "release:dir": "electron-vite build && electron-builder --win --dir",
+  "dist": "npm run release"
+},
+  "dependencies": {},
+  "devDependencies": {
     "@frc-web-components/frc-web-components": "^4.5.3-alpha.0",
     "@frc-web-components/fwc": "^3.4.0",
     "@frc-web-components/react": "^2.1.2",
-    "concurrently": "^9.2.1",
-    "cross-env": "^10.1.0",
-    "fs": "^0.0.1-security",
-    "lucide-react": "^0.545.0",
-    "ntcore-react": "^2.0.3",
-    "ntcore-ts-client": "^3.1.3",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
-  },
-  "devDependencies": {
     "@tailwindcss/postcss": "^4.1.18",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.1",
     "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.4.24",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
     "electron": "^38.2.2",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "fs": "^0.0.1-security",
+    "lucide-react": "^0.545.0",
+    "ntcore-react": "^2.0.3",
+    "ntcore-ts-client": "^3.1.3",
     "postcss": "^8.5.6",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "tailwindcss": "^4.1.18",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
     "vite": "^5.4.20"
   },
   "build": {
-    "appId": "com.frcteam4188.voyager",
+    "appId": "com.team4188.voyager",
     "productName": "Voyager",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json",
+      "!node_modules/**/*"
+    ],
+    "npmRebuild": false,
+    "extraResources": [
+      {
+        "from": "electron/Group 1.png",
+        "to": "icon.png"
+      }
+    ],
     "win": {
-      "icon": "build/icons/icon.ico",
-      "target": "portable"
+      "icon": "electron/Group 1.png",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
     },
     "linux": {
       "icon": "build/icons/256x256.png"

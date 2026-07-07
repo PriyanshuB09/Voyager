@@ -3,13 +3,13 @@
 @font-face {
   font-family: 'SF Pro';
   display: swap;
-  src: url(./assets/SF-Pro-Rounded-Semibold.ttf) format('truetype');
+  src: url(SF-Pro-Rounded-Semibold.ttf) format('truetype');
 }
 
 @font-face {
   font-family: 'IBM Plex Sans';
   display: swap;
-  src: url(./assets/IBMPlexSans-Regular.ttf) format('truetype');
+  src: url(IBMPlexSans-Regular.ttf) format('truetype');
 }
 
 @theme {

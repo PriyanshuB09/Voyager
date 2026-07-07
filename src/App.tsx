@@ -15,7 +15,6 @@ import type {
   RefObject,
 } from "react";
 
-//@ts-ignore
 import "./styles/style.css";
 
 type OriginCorner = "bl" | "br" | "tl" | "tr";

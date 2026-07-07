@@ -46,49 +46,38 @@ function resolveSafeFilePath(folder: string, fileName: string) {
 }
 
 function createWindow() {
-  let iconPath;
+  const iconPath = app.isPackaged
+    ? path.join(process.resourcesPath, "icon.png")
+    : path.join(__dirname, "../../electron/Group 1.png");
 
-  if (process.platform === "win32") {
-    iconPath = path.join(__dirname, "../assets/icons/Group 1.ico");
-  } else if (process.platform === "darwin") {
-    iconPath = path.join(__dirname, "../assets/icons/icon.icns");
+  const win = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    icon: iconPath,
+    webPreferences: {
+      preload: path.join(__dirname, "../preload/preload.mjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+    titleBarStyle: "hidden",
+    backgroundColor: "#090D14",
+    accentColor: "#969696",
+    ...(process.platform !== "darwin"
+      ? {
+          titleBarOverlay: {
+            color: "#090D14",
+            symbolColor: "#EDEDED",
+            height: 39,
+          },
+        }
+      : {}),
+  });
+
+  if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) {
+    void win.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
-    iconPath = path.join(__dirname, "../assets/icons/icon.png");
+    void win.loadFile(path.join(__dirname, "../renderer/index.html"));
   }
-
-  const preloadPath = path.join(__dirname, "preload.js");
-console.log("[electron] preload path:", preloadPath);
-console.log("[electron] preload exists:", fs.existsSync(preloadPath));
-
-const win = new BrowserWindow({
-  width: 1200,
-  height: 800,
-  icon: iconPath,
-  webPreferences: {
-    preload: preloadPath,
-    contextIsolation: true,
-    nodeIntegration: false,
-  },
-  titleBarStyle: "hidden",
-  backgroundColor: "#090D14",
-  accentColor: "#969696",
-  ...(process.platform !== "darwin"
-    ? {
-        titleBarOverlay: {
-          color: "#090D14",
-          symbolColor: "#EDEDED",
-          height: 39,
-        },
-      }
-    : {}),
-});
-
-  const startUrl =
-    process.env.NODE_ENV === "development"
-      ? "http://localhost:5173"
-      : `file://${path.join(__dirname, "../dist/index.html")}`;
-
-  win.loadURL(startUrl);
 }
 
 nativeTheme.themeSource = "light";
