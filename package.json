@@ -1,6 +1,6 @@
 {
   "name": "csp-voyager",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "Priyanshu Biswal",
   "description": "An open-source FIRST Robotics Competition autonomous builder dashboard. Promotes modularity and branching, as well visual graphs and support for object detection deviances.",
   "main": "out/main/main.js",

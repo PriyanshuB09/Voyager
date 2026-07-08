@@ -16,6 +16,12 @@ export default defineConfig({
     build: {
       rollupOptions: {
         input: resolve(__dirname, "electron/preload.ts"),
+        output: {
+          // Sandboxed Electron renderers cannot execute an ESM preload. Keep
+          // the TypeScript source, but emit an explicit CommonJS artifact.
+          format: "cjs",
+          entryFileNames: "preload.cjs",
+        },
       },
     },
   },

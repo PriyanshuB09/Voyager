@@ -49,15 +49,17 @@ function createWindow() {
   const iconPath = app.isPackaged
     ? path.join(process.resourcesPath, "icon.png")
     : path.join(__dirname, "../../electron/Group 1.png");
+  const preloadPath = path.join(__dirname, "../preload/preload.cjs");
 
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
     icon: iconPath,
     webPreferences: {
-      preload: path.join(__dirname, "../preload/preload.mjs"),
+      preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
     titleBarStyle: "hidden",
     backgroundColor: "#090D14",
@@ -71,6 +73,10 @@ function createWindow() {
           },
         }
       : {}),
+  });
+
+  win.webContents.on("preload-error", (_event, failedPath, error) => {
+    console.error(`Failed to load Electron preload at ${failedPath}:`, error);
   });
 
   if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) {

@@ -27,8 +27,8 @@ Voyager helps FRC teams design, organize, and deploy autonomous routines without
 
 Prebuilt packages are available from this repository's [GitHub Releases](https://github.com/PriyanshuB09/Voyager/releases):
 
-- **Installer:** `Voyager Setup <version>.exe`
-- **Portable:** `Voyager <version>.exe`
+- **Installer:** `Voyager Setup 1.0.1.exe`
+- **Portable:** `Voyager 1.0.1.exe`
 
 The installer is recommended for most users. The portable edition can be launched directly without installation.
 
@@ -135,8 +135,8 @@ Release artifacts are written to `release/`:
 
 ```text
 release/
-|-- Voyager Setup <version>.exe
-`-- Voyager <version>.exe
+|-- Voyager Setup 1.0.1.exe
+`-- Voyager 1.0.1.exe
 ```
 
 Before publishing a new release, update the `version` field in `package.json`, build both packages, launch the packaged application for a smoke test, and attach the resulting executables to a GitHub Release.
@@ -150,7 +150,7 @@ Voyager/
 |-- src/                     React application and styles
 |-- electron.vite.config.ts  Electron/Vite build configuration
 |-- package.json             Scripts, dependencies, and packaging settings
-`-- RELEASE_NOTES_v1.0.0.md  Current release notes
+`-- RELEASE_NOTES_v1.0.1.md  Current release notes
 ```
 
 ## Technology
