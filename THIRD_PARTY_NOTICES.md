@@ -11,7 +11,7 @@ Copyright (c) 2025, Rebel Robotics (FRC 2638)
 
 Licensed under the BSD 3-Clause License.
 
-Source: <PUT BLINE SOURCE URL HERE>
+Source: [BLine-Lib](https://github.com/edanliahovetsky/BLine-Lib)
 
 VoyagerLib is not endorsed by, sponsored by, or officially affiliated with Edan Liahovetsky or Rebel Robotics unless explicit written permission is granted.
 
