@@ -47,6 +47,19 @@ https://priyanshub09.github.io/VoyagerLib-Public/VoyagerLib.json
 
 In a WPILib project, open the Command Palette and choose **WPILib: Manage Vendor Libraries**, then install a new library from the online URL above. The current public vendordep targets the 2026 FRC season and provides the Java artifact `com.team4188:voyager`.
 
+## Powered by BLine
+
+VoyagerLib’s backend pathing and autonomous execution logic is powered by BLine, an open-source robotics library created by Edan Liahovetsky and Rebel Robotics (FRC 2638), which is a dependency of VoyagerLib.
+
+BLine is licensed under the BSD 3-Clause License.
+
+Copyright (c) 2025, Edan Liahovetsky  
+Copyright (c) 2025, Rebel Robotics (FRC 2638)
+
+VoyagerLib is not endorsed by, sponsored by, or officially affiliated with Edan Liahovetsky or Rebel Robotics unless otherwise stated.
+
+See [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md) for full license text and attribution details.
+
 ## Getting Started
 
 1. Install or launch Voyager from the Releases page.
