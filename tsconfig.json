@@ -4,6 +4,10 @@
     "lib": ["DOM", "ESNext"],
     "module": "ESNext",
     "moduleResolution": "node",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
     "jsx": "react-jsx",
     "strict": true,
     "esModuleInterop": true,

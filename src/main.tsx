@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { NT4Provider } from "@frc-web-components/react";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 const NT4_ADDRESS_STORAGE_KEY = "voyager.nt4.address";
 const DEFAULT_NT4_ADDRESS = "9999";
@@ -27,9 +28,11 @@ function VoyagerRoot(): React.ReactElement {
   }, [nt4Address]);
 
   return (
-    <NT4Provider key={nt4Address} address={nt4Address}>
-      <App nt4Address={nt4Address} setNt4Address={setNt4Address} />
-    </NT4Provider>
+    <TooltipProvider>
+      <NT4Provider key={nt4Address} address={nt4Address}>
+        <App nt4Address={nt4Address} setNt4Address={setNt4Address} />
+      </NT4Provider>
+    </TooltipProvider>
   );
 }
 

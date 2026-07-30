@@ -1,7 +1,15 @@
 import { useEntry } from "@frc-web-components/react";
+import {
+  AlertTriangle,
+  History,
+  LocateFixed,
+  Palette,
+  Sparkles,
+} from "lucide-react";
 import React, {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -15,6 +23,19 @@ import type {
   RefObject,
 } from "react";
 
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import "./styles/style.css";
 
 type OriginCorner = "bl" | "br" | "tl" | "tr";
@@ -22,6 +43,31 @@ type AddElementKind = "waypoint" | "rotationTarget" | "eventTrigger" | "constrai
 type TreeKind = "path" | "if" | "loop" | "interrupt" | "event";
 type ChildSlot = "next" | "true" | "false" | "forloop" | "interruptable";
 type SaveStatusKind = "idle" | "saving" | "saved" | "error";
+type LayoutMode = "default" | "horizontal" | "mirrored" | "focus";
+
+interface ThemePalette {
+  background: string;
+  panel: string;
+  panel2: string;
+  panel3: string;
+  text: string;
+  muted: string;
+  faint: string;
+  accent: string;
+  accent2: string;
+  border: string;
+  borderStrong: string;
+  warn: string;
+  danger: string;
+  success: string;
+}
+
+interface ThemePreset {
+  id: string;
+  name: string;
+  description: string;
+  palette: ThemePalette;
+}
 
 interface ElectronAPI {
   pickDirectory: () => Promise<string | null>;
@@ -55,9 +101,33 @@ interface Settings {
   fieldLengthMeters: number;
   robotLengthMeters: number;
   robotWidthMeters: number;
+  swerveWheelLengthMeters: number;
+  swerveWheelWidthMeters: number;
+  swerveModuleOffsetXMeters: number;
+  swerveModuleOffsetYMeters: number;
   originCorner: OriginCorner;
   centerOfRotationX: number;
   centerOfRotationY: number;
+  maxTranslationalVelocity: number;
+  maxTranslationalAcceleration: number;
+  maxRotationalVelocity: number;
+  maxRotationalAcceleration: number;
+  endTranslationToleranceMeters: number;
+  endRotationToleranceDegrees: number;
+  defaultIntermediateHandOffRadiusMeters: number;
+  translationalControllerP: number;
+  translationalControllerI: number;
+  translationalControllerD: number;
+  cteControllerP: number;
+  cteControllerI: number;
+  cteControllerD: number;
+  rotationalControllerP: number;
+  rotationalControllerI: number;
+  rotationalControllerD: number;
+  layoutMode: LayoutMode;
+  themePreset: string;
+  customThemeName: string;
+  customTheme: ThemePalette;
   autoSave: boolean;
 }
 
@@ -157,6 +227,11 @@ interface PixelPoint {
   y: number;
 }
 
+interface TreeModalRect extends PixelPoint {
+  width: number;
+  height: number;
+}
+
 interface ModalBase {
   x: number;
   y: number;
@@ -214,6 +289,11 @@ interface SaveStatus {
   message: string;
 }
 
+interface ActivityLogEntry extends SaveStatus {
+  id: string;
+  timestamp: number;
+}
+
 interface PersistedAppState {
   settings: Settings;
   treeNodes: PathTreeNode[];
@@ -233,6 +313,48 @@ interface EditorHistory {
   past: EditorSnapshot[];
   present: EditorSnapshot;
   future: EditorSnapshot[];
+}
+
+interface TreeClipboardSnapshot {
+  rootId: string;
+  nodes: PathTreeNode[];
+  pathDataByNodeId: Record<string, SharedPathData>;
+}
+
+interface PlaybackSection {
+  startPosition: number;
+  endPosition: number;
+  startTime: number;
+  endTime: number;
+  startAngle: number;
+  endAngle: number;
+}
+
+interface PlaybackPlan {
+  sections: PlaybackSection[];
+  movementDuration: number;
+  settlingDuration: number;
+  totalDuration: number;
+}
+
+interface PlaybackPose extends MeterPoint {
+  angle: number;
+}
+
+interface RobotVelocity {
+  vx: number;
+  vy: number;
+  omega: number;
+}
+
+interface SwerveModuleState {
+  id: string;
+  xPercent: number;
+  yPercent: number;
+  lengthPercent: number;
+  widthPercent: number;
+  angleDegrees: number;
+  speed: number;
 }
 
 interface SerializedWaypoint {
@@ -263,6 +385,12 @@ interface SerializedConstraintZone {
 }
 
 interface SerializedPathFile {
+  max_translational_velocity: number;
+  max_translational_acceleration: number;
+  max_rotational_velocity: number;
+  max_rotational_acceleration: number;
+  end_translation_tolerance_meters: number;
+  end_rotation_tolerance_deg: number;
   waypoints: SerializedWaypoint[];
   rotation_targets: SerializedRotationTarget[];
   events: SerializedEventTrigger[];
@@ -289,6 +417,83 @@ const DB_STORE = "kv";
 const APP_STATE_KEY = "app-state";
 const NODE_WIDTH = 160;
 const NODE_HEIGHT = 62;
+const THEME_PRESETS: ThemePreset[] = [
+  {
+    id: "voyager",
+    name: "Voyager Core",
+    description: "The familiar teal and cyan command-center palette.",
+    palette: { background: "#090d14", panel: "#0f1521", panel2: "#121a2a", panel3: "#172033", text: "#e5ecf7", muted: "#94a3b8", faint: "#64748b", accent: "#5eead4", accent2: "#38bdf8", border: "#263447", borderStrong: "#52647b", warn: "#facc15", danger: "#fb7185", success: "#86efac" },
+  },
+  {
+    id: "neural-violet",
+    name: "Neural Violet",
+    description: "Electric violet with cool inference-blue highlights.",
+    palette: { background: "#0d0a16", panel: "#151022", panel2: "#1b1530", panel3: "#251b3f", text: "#f1eaff", muted: "#ad9cc7", faint: "#73648d", accent: "#c084fc", accent2: "#818cf8", border: "#34264c", borderStrong: "#675080", warn: "#fbbf24", danger: "#fb7185", success: "#86efac" },
+  },
+  {
+    id: "deep-space",
+    name: "Deep Space",
+    description: "Midnight navy with orbital blue telemetry.",
+    palette: { background: "#050914", panel: "#0a1223", panel2: "#0d1930", panel3: "#122440", text: "#e6f0ff", muted: "#8fa6c8", faint: "#56709a", accent: "#60a5fa", accent2: "#22d3ee", border: "#1d3557", borderStrong: "#46668f", warn: "#fcd34d", danger: "#f87171", success: "#6ee7b7" },
+  },
+  {
+    id: "aurora",
+    name: "Aurora",
+    description: "Green and arctic-blue signals over a polar night.",
+    palette: { background: "#07110f", panel: "#0c1a17", panel2: "#10231f", panel3: "#17302a", text: "#e7fff8", muted: "#8eb9ac", faint: "#567d72", accent: "#34d399", accent2: "#67e8f9", border: "#20443b", borderStrong: "#4e766b", warn: "#fde047", danger: "#fb7185", success: "#4ade80" },
+  },
+  {
+    id: "cobalt",
+    name: "Cobalt Lab",
+    description: "Focused laboratory blues with crisp cyan actions.",
+    palette: { background: "#080c18", panel: "#0e1629", panel2: "#14203a", panel3: "#1b2b4c", text: "#e8efff", muted: "#9aabd0", faint: "#60749d", accent: "#3b82f6", accent2: "#06b6d4", border: "#25395f", borderStrong: "#516b99", warn: "#fbbf24", danger: "#f43f5e", success: "#22c55e" },
+  },
+  {
+    id: "ember",
+    name: "Ember Drive",
+    description: "Warm orange execution states on deep charcoal.",
+    palette: { background: "#120b08", panel: "#1d120e", panel2: "#291811", panel3: "#382116", text: "#fff0e6", muted: "#c5a18d", faint: "#896c5d", accent: "#fb923c", accent2: "#facc15", border: "#4a2b1d", borderStrong: "#7e5844", warn: "#fde047", danger: "#fb7185", success: "#86efac" },
+  },
+  {
+    id: "rose-circuit",
+    name: "Rose Circuit",
+    description: "Magenta and rose accents with a graphite foundation.",
+    palette: { background: "#120910", panel: "#1d101a", panel2: "#291523", panel3: "#391d31", text: "#ffeaf8", muted: "#c39ab5", faint: "#86647a", accent: "#f472b6", accent2: "#c084fc", border: "#4b2941", borderStrong: "#7b506e", warn: "#fcd34d", danger: "#fb7185", success: "#6ee7b7" },
+  },
+  {
+    id: "matrix",
+    name: "Matrix Ops",
+    description: "High-signal green for fast pit-side diagnostics.",
+    palette: { background: "#050b07", panel: "#09140d", panel2: "#0d1d13", panel3: "#13291b", text: "#e6ffed", muted: "#8bb99a", faint: "#557d62", accent: "#4ade80", accent2: "#a3e635", border: "#1d3d28", borderStrong: "#477456", warn: "#facc15", danger: "#f87171", success: "#22c55e" },
+  },
+  {
+    id: "graphite",
+    name: "Graphite",
+    description: "Low-distraction neutral surfaces with silver signals.",
+    palette: { background: "#0b0c0e", panel: "#131518", panel2: "#1a1d21", panel3: "#23272c", text: "#f1f3f5", muted: "#a1a7ae", faint: "#6c737c", accent: "#d1d5db", accent2: "#93c5fd", border: "#30353b", borderStrong: "#626a73", warn: "#facc15", danger: "#fb7185", success: "#86efac" },
+  },
+  {
+    id: "high-contrast",
+    name: "High Contrast",
+    description: "Maximum separation for bright pits and quick scanning.",
+    palette: { background: "#020305", panel: "#090b0f", panel2: "#11151b", panel3: "#1b222c", text: "#ffffff", muted: "#cbd5e1", faint: "#94a3b8", accent: "#22d3ee", accent2: "#f8fafc", border: "#475569", borderStrong: "#94a3b8", warn: "#fde047", danger: "#fb7185", success: "#4ade80" },
+  },
+];
+const DEFAULT_THEME = THEME_PRESETS[0];
+const CUSTOM_THEME_FIELDS: Array<{ key: keyof ThemePalette; label: string }> = [
+  { key: "background", label: "Background" },
+  { key: "panel", label: "Panel" },
+  { key: "panel2", label: "Raised panel" },
+  { key: "panel3", label: "Hover surface" },
+  { key: "text", label: "Text" },
+  { key: "muted", label: "Muted text" },
+  { key: "accent", label: "Primary accent" },
+  { key: "accent2", label: "Secondary accent" },
+  { key: "border", label: "Border" },
+  { key: "danger", label: "Danger" },
+  { key: "warn", label: "Warning" },
+  { key: "success", label: "Success" },
+];
 const DEFAULT_SETTINGS: Settings = {
   fieldImageDataUrl: null,
   robotCodeProjectFolder: null,
@@ -296,9 +501,33 @@ const DEFAULT_SETTINGS: Settings = {
   fieldLengthMeters: 16.46,
   robotLengthMeters: 0.9,
   robotWidthMeters: 0.9,
+  swerveWheelLengthMeters: 0.16,
+  swerveWheelWidthMeters: 0.04,
+  swerveModuleOffsetXMeters: 0.1,
+  swerveModuleOffsetYMeters: 0.1,
   originCorner: "bl",
   centerOfRotationX: 0.45,
   centerOfRotationY: 0.45,
+  maxTranslationalVelocity: 4.5,
+  maxTranslationalAcceleration: 10,
+  maxRotationalVelocity: 720,
+  maxRotationalAcceleration: 1500,
+  endTranslationToleranceMeters: 0.03,
+  endRotationToleranceDegrees: 2,
+  defaultIntermediateHandOffRadiusMeters: 0.2,
+  translationalControllerP: 5,
+  translationalControllerI: 0,
+  translationalControllerD: 0,
+  cteControllerP: 2,
+  cteControllerI: 0,
+  cteControllerD: 0,
+  rotationalControllerP: 3,
+  rotationalControllerI: 0,
+  rotationalControllerD: 0,
+  layoutMode: "default",
+  themePreset: DEFAULT_THEME.id,
+  customThemeName: "My Voyager Theme",
+  customTheme: { ...DEFAULT_THEME.palette },
   autoSave: false,
 };
 
@@ -450,7 +679,7 @@ function createDefaultWaypoint(settings: Settings): Waypoint {
     x: settings.fieldLengthMeters / 2,
     y: settings.fieldWidthMeters / 2,
     angle: 0,
-    handoff: 0.2,
+    handoff: settings.defaultIntermediateHandOffRadiusMeters,
     profiled: true,
   };
 }
@@ -472,13 +701,13 @@ function createDefaultEventTrigger(maxPosition: number): EventTrigger {
   };
 }
 
-function createDefaultConstraintZone(maxPosition: number): ConstraintZone {
+function createDefaultConstraintZone(maxPosition: number, settings: Settings): ConstraintZone {
   return {
     id: createId("constraint"),
-    maxTranslationalVelocity: 1,
-    maxTranslationalAcceleration: 5,
-    maxRotationalVelocity: 180,
-    maxRotationalAcceleration: 360,
+    maxTranslationalVelocity: settings.maxTranslationalVelocity,
+    maxTranslationalAcceleration: settings.maxTranslationalAcceleration,
+    maxRotationalVelocity: settings.maxRotationalVelocity,
+    maxRotationalAcceleration: settings.maxRotationalAcceleration,
     startPosition: 0,
     endPosition: clamp(1, 0, maxPosition),
   };
@@ -629,6 +858,85 @@ function collectSubtreeNodeIds(rootId: string, nodes: PathTreeNode[]): Set<strin
   return collected;
 }
 
+function cloneSharedPathData(path: SharedPathData): SharedPathData {
+  return {
+    waypoints: path.waypoints.map((waypoint) => ({ ...waypoint, id: createId("waypoint") })),
+    rotationTargets: path.rotationTargets.map((target) => ({ ...target, id: createId("rotation_target") })),
+    events: path.events.map((event) => ({ ...event, id: createId("event") })),
+    constraintZones: path.constraintZones.map((zone) => ({ ...zone, id: createId("constraint") })),
+  };
+}
+
+function copyTreeSnapshot(
+  rootId: string,
+  nodes: PathTreeNode[],
+  pathDataByName: Record<string, SharedPathData>,
+  includeChildren: boolean,
+): TreeClipboardSnapshot | null {
+  const root = nodes.find((node) => node.id === rootId);
+  if (!root) return null;
+  const includedIds = includeChildren ? collectSubtreeNodeIds(rootId, nodes) : new Set([rootId]);
+  const copiedNodes = nodes
+    .filter((node) => includedIds.has(node.id))
+    .map((node) => {
+      let copied = { ...node, parentId: node.parentId && includedIds.has(node.parentId) ? node.parentId : null } as PathTreeNode;
+      for (const slot of ["next", "true", "false", "forloop", "interruptable"] as ChildSlot[]) {
+        if (!supportsChildSlot(copied, slot)) continue;
+        const childId = childIdForSlot(copied, slot);
+        copied = setChildForSlot(copied, slot, childId && includedIds.has(childId) ? childId : null);
+      }
+      return copied;
+    });
+  const pathDataByNodeId: Record<string, SharedPathData> = {};
+  copiedNodes.forEach((node) => {
+    if (node.kind === "path") pathDataByNodeId[node.id] = cloneSharedPathData(pathDataByName[node.name] ?? createEmptyPathData());
+  });
+  return { rootId, nodes: copiedNodes, pathDataByNodeId };
+}
+
+function uniqueCopiedNodeName(originalName: string, usedNames: Set<string>): string {
+  const base = `${originalName} Copy`;
+  let name = base;
+  let index = 2;
+  while (usedNames.has(name)) {
+    name = `${base} ${index}`;
+    index += 1;
+  }
+  usedNames.add(name);
+  return name;
+}
+
+function instantiateTreeSnapshot(
+  snapshot: TreeClipboardSnapshot,
+  existingNodes: PathTreeNode[],
+  offset: number,
+): { nodes: PathTreeNode[]; pathDataByName: Record<string, SharedPathData>; rootId: string } {
+  const idMap = new Map(snapshot.nodes.map((node) => [node.id, createId(node.kind)]));
+  const usedNames = new Set(existingNodes.map((node) => node.name));
+  const pathDataByName: Record<string, SharedPathData> = {};
+  const copiedNodes = snapshot.nodes.map((node) => {
+    const name = uniqueCopiedNodeName(node.name, usedNames);
+    let copied = {
+      ...node,
+      id: idMap.get(node.id)!,
+      name,
+      x: node.x + offset,
+      y: node.y + offset,
+      parentId: node.parentId ? idMap.get(node.parentId) ?? null : null,
+      selectedForRoutine: false,
+      editing: false,
+    } as PathTreeNode;
+    for (const slot of ["next", "true", "false", "forloop", "interruptable"] as ChildSlot[]) {
+      if (!supportsChildSlot(copied, slot)) continue;
+      const childId = childIdForSlot(node, slot);
+      copied = setChildForSlot(copied, slot, childId ? idMap.get(childId) ?? null : null);
+    }
+    if (node.kind === "path") pathDataByName[name] = cloneSharedPathData(snapshot.pathDataByNodeId[node.id] ?? createEmptyPathData());
+    return copied;
+  });
+  return { nodes: copiedNodes, pathDataByName, rootId: idMap.get(snapshot.rootId)! };
+}
+
 function routineCodeForRoot(root: PathTreeNode): string {
   const code = root.id.replace(/[^a-zA-Z0-9]/g, "");
   return code.length > 0 ? code : root.name.replace(/[^a-zA-Z0-9]/g, "") || "VoyagerAuto";
@@ -725,6 +1033,304 @@ function pointAtPathPosition(waypoints: Waypoint[], position: number): MeterPoin
   };
 }
 
+function shortestAngleDelta(startDegrees: number, endDegrees: number): number {
+  return normalizeCompassDegrees(endDegrees - startDegrees);
+}
+
+function angleAtPathPosition(path: SharedPathData, position: number): number {
+  if (path.waypoints.length === 0) return 0;
+
+  const anglesByPosition = new Map<number, number>();
+  path.waypoints.forEach((waypoint, index) => anglesByPosition.set(index, normalizeCompassDegrees(waypoint.angle)));
+  path.rotationTargets.forEach((target) => {
+    anglesByPosition.set(clamp(target.position, 0, maxPathPosition(path)), normalizeCompassDegrees(target.angle));
+  });
+
+  const keys = Array.from(anglesByPosition.entries())
+    .map(([keyPosition, angle]) => ({ position: keyPosition, angle }))
+    .sort((left, right) => left.position - right.position);
+  const clampedPosition = clamp(position, 0, maxPathPosition(path));
+  const nextIndex = keys.findIndex((key) => key.position >= clampedPosition);
+  if (nextIndex <= 0) return keys[0]?.angle ?? 0;
+  if (nextIndex < 0) return keys.at(-1)?.angle ?? 0;
+
+  const previous = keys[nextIndex - 1];
+  const next = keys[nextIndex];
+  const span = next.position - previous.position;
+  const progress = span <= 0 ? 1 : clamp((clampedPosition - previous.position) / span, 0, 1);
+  return normalizeCompassDegrees(previous.angle + shortestAngleDelta(previous.angle, next.angle) * progress);
+}
+
+function distanceBetween(left: MeterPoint, right: MeterPoint): number {
+  return Math.hypot(right.x - left.x, right.y - left.y);
+}
+
+function minimumMotionTime(distance: number, maxVelocity: number, maxAcceleration: number): number {
+  const cleanDistance = Math.max(0, distance);
+  const velocity = Math.max(0.001, maxVelocity);
+  const acceleration = Math.max(0.001, maxAcceleration);
+  const accelerationDistance = (velocity * velocity) / acceleration;
+
+  if (cleanDistance <= accelerationDistance) return 2 * Math.sqrt(cleanDistance / acceleration);
+  return (2 * velocity) / acceleration + (cleanDistance - accelerationDistance) / velocity;
+}
+
+function controllerEffectiveness(proportional: number, integral: number, derivative: number, nominalProportional: number): number {
+  const authority = Math.max(0, proportional) + Math.sqrt(Math.max(0, integral)) * 0.25 + Math.max(0, derivative) * 0.05;
+  return clamp(authority / Math.max(0.001, nominalProportional), 0.15, 1);
+}
+
+function controllerSettlingTime(referenceError: number, tolerance: number, proportional: number, integral: number, derivative: number): number {
+  const cleanTolerance = Math.max(0.0001, tolerance);
+  const responseRate = Math.max(0.25, Math.max(0, proportional) + Math.sqrt(Math.max(0, integral)) * 0.5 + Math.max(0, derivative) * 0.1);
+  return clamp(Math.log(Math.max(1, referenceError / cleanTolerance)) / responseRate, 0, 3);
+}
+
+function buildPlaybackPlan(path: SharedPathData, settings: Settings): PlaybackPlan {
+  if (path.waypoints.length < 2) return { sections: [], movementDuration: 0, settlingDuration: 0, totalDuration: 0 };
+
+  const maximumPosition = maxPathPosition(path);
+  const boundaryValues = [0, maximumPosition];
+  for (let index = 1; index < path.waypoints.length - 1; index += 1) boundaryValues.push(index);
+  path.rotationTargets.forEach((target) => boundaryValues.push(clamp(target.position, 0, maximumPosition)));
+  path.constraintZones.forEach((zone) => {
+    boundaryValues.push(clamp(zone.startPosition, 0, maximumPosition));
+    boundaryValues.push(clamp(zone.endPosition, 0, maximumPosition));
+  });
+
+  const boundaries = Array.from(new Set(boundaryValues.map((value) => Number(value.toFixed(6)))))
+    .sort((left, right) => left - right);
+  const translationalEffectiveness = controllerEffectiveness(
+    settings.translationalControllerP,
+    settings.translationalControllerI,
+    settings.translationalControllerD,
+    DEFAULT_SETTINGS.translationalControllerP,
+  );
+  const cteEffectiveness = controllerEffectiveness(
+    settings.cteControllerP,
+    settings.cteControllerI,
+    settings.cteControllerD,
+    DEFAULT_SETTINGS.cteControllerP,
+  );
+  const rotationalEffectiveness = controllerEffectiveness(
+    settings.rotationalControllerP,
+    settings.rotationalControllerI,
+    settings.rotationalControllerD,
+    DEFAULT_SETTINGS.rotationalControllerP,
+  );
+  const sections: PlaybackSection[] = [];
+  let elapsed = 0;
+
+  for (let index = 0; index < boundaries.length - 1; index += 1) {
+    const startPosition = boundaries[index];
+    const endPosition = boundaries[index + 1];
+    if (endPosition <= startPosition) continue;
+    const startPoint = pointAtPathPosition(path.waypoints, startPosition);
+    const endPoint = pointAtPathPosition(path.waypoints, endPosition);
+    if (!startPoint || !endPoint) continue;
+
+    const midpoint = (startPosition + endPosition) / 2;
+    const activeZones = path.constraintZones.filter((zone) => {
+      const start = Math.min(zone.startPosition, zone.endPosition);
+      const end = Math.max(zone.startPosition, zone.endPosition);
+      return midpoint >= start && midpoint <= end;
+    });
+    const translationalVelocity = activeZones.reduce(
+      (value, zone) => Math.min(value, safePositive(zone.maxTranslationalVelocity, value)),
+      settings.maxTranslationalVelocity,
+    );
+    const translationalAcceleration = activeZones.reduce(
+      (value, zone) => Math.min(value, safePositive(zone.maxTranslationalAcceleration, value)),
+      settings.maxTranslationalAcceleration,
+    );
+    const rotationalVelocity = activeZones.reduce(
+      (value, zone) => Math.min(value, safePositive(zone.maxRotationalVelocity, value)),
+      settings.maxRotationalVelocity,
+    );
+    const rotationalAcceleration = activeZones.reduce(
+      (value, zone) => Math.min(value, safePositive(zone.maxRotationalAcceleration, value)),
+      settings.maxRotationalAcceleration,
+    );
+    const startAngle = angleAtPathPosition(path, startPosition);
+    const endAngle = angleAtPathPosition(path, endPosition);
+    let translationTime = minimumMotionTime(
+      distanceBetween(startPoint, endPoint),
+      safePositive(translationalVelocity, DEFAULT_SETTINGS.maxTranslationalVelocity),
+      safePositive(translationalAcceleration, DEFAULT_SETTINGS.maxTranslationalAcceleration) * Math.min(translationalEffectiveness, cteEffectiveness),
+    );
+    const roundedEndPosition = Math.round(endPosition);
+    if (roundedEndPosition > 0 && roundedEndPosition < maximumPosition && Math.abs(endPosition - roundedEndPosition) < 0.000001) {
+      const previousWaypoint = path.waypoints[roundedEndPosition - 1];
+      const waypoint = path.waypoints[roundedEndPosition];
+      const nextWaypoint = path.waypoints[roundedEndPosition + 1];
+      const adjacentDistance = Math.min(distanceBetween(previousWaypoint, waypoint), distanceBetween(waypoint, nextWaypoint));
+      const handoffRadius = safePositive(waypoint.handoff, settings.defaultIntermediateHandOffRadiusMeters);
+      const handoffRatio = adjacentDistance > 0 ? clamp(handoffRadius / adjacentDistance, 0, 0.8) : 0;
+      translationTime *= 1 - handoffRatio * 0.35;
+    }
+    const rotationTime = minimumMotionTime(
+      Math.abs(shortestAngleDelta(startAngle, endAngle)),
+      safePositive(rotationalVelocity, DEFAULT_SETTINGS.maxRotationalVelocity),
+      safePositive(rotationalAcceleration, DEFAULT_SETTINGS.maxRotationalAcceleration) * rotationalEffectiveness,
+    );
+    const duration = Math.max(translationTime, rotationTime, 0.02);
+
+    sections.push({
+      startPosition,
+      endPosition,
+      startTime: elapsed,
+      endTime: elapsed + duration,
+      startAngle,
+      endAngle,
+    });
+    elapsed += duration;
+  }
+
+  const finalSection = sections.at(-1);
+  const finalDistanceReference = finalSection
+    ? distanceBetween(
+        pointAtPathPosition(path.waypoints, finalSection.startPosition) ?? path.waypoints.at(-1)!,
+        pointAtPathPosition(path.waypoints, finalSection.endPosition) ?? path.waypoints.at(-1)!,
+      )
+    : 0;
+  const finalRotationReference = finalSection ? Math.abs(shortestAngleDelta(finalSection.startAngle, finalSection.endAngle)) : 0;
+  const settlingDuration = Math.max(
+    controllerSettlingTime(
+      Math.max(settings.endTranslationToleranceMeters, Math.min(1, finalDistanceReference)),
+      settings.endTranslationToleranceMeters,
+      settings.translationalControllerP,
+      settings.translationalControllerI,
+      settings.translationalControllerD,
+    ),
+    controllerSettlingTime(
+      Math.max(settings.endTranslationToleranceMeters, Math.min(1, finalDistanceReference * 0.5)),
+      settings.endTranslationToleranceMeters,
+      settings.cteControllerP,
+      settings.cteControllerI,
+      settings.cteControllerD,
+    ),
+    controllerSettlingTime(
+      Math.max(settings.endRotationToleranceDegrees, Math.min(90, finalRotationReference)),
+      settings.endRotationToleranceDegrees,
+      settings.rotationalControllerP,
+      settings.rotationalControllerI,
+      settings.rotationalControllerD,
+    ),
+  );
+
+  return {
+    sections,
+    movementDuration: elapsed,
+    settlingDuration,
+    totalDuration: elapsed + settlingDuration,
+  };
+}
+
+function poseAtPlaybackTime(path: SharedPathData, plan: PlaybackPlan, time: number): PlaybackPose | null {
+  if (path.waypoints.length === 0) return null;
+  if (plan.sections.length === 0) {
+    const waypoint = path.waypoints[0];
+    return { x: waypoint.x, y: waypoint.y, angle: normalizeCompassDegrees(waypoint.angle) };
+  }
+
+  const clampedTime = clamp(time, 0, plan.totalDuration);
+  const section = plan.sections.find((candidate) => clampedTime <= candidate.endTime) ?? plan.sections.at(-1)!;
+  const duration = section.endTime - section.startTime;
+  const progress = clampedTime >= plan.movementDuration || duration <= 0
+    ? 1
+    : clamp((clampedTime - section.startTime) / duration, 0, 1);
+  const position = section.startPosition + (section.endPosition - section.startPosition) * progress;
+  const point = pointAtPathPosition(path.waypoints, position) ?? path.waypoints.at(-1)!;
+  return {
+    x: point.x,
+    y: point.y,
+    angle: normalizeCompassDegrees(section.startAngle + shortestAngleDelta(section.startAngle, section.endAngle) * progress),
+  };
+}
+
+function playbackVelocityAtTime(path: SharedPathData, plan: PlaybackPlan, time: number): RobotVelocity {
+  if (plan.movementDuration <= 0 || time >= plan.movementDuration) return { vx: 0, vy: 0, omega: 0 };
+  const sampleWindow = Math.min(0.04, Math.max(0.005, plan.movementDuration / 200));
+  const startTime = clamp(time - sampleWindow, 0, plan.movementDuration);
+  const endTime = clamp(time + sampleWindow, 0, plan.movementDuration);
+  const elapsed = endTime - startTime;
+  if (elapsed <= 0) return { vx: 0, vy: 0, omega: 0 };
+  const start = poseAtPlaybackTime(path, plan, startTime);
+  const end = poseAtPlaybackTime(path, plan, endTime);
+  if (!start || !end) return { vx: 0, vy: 0, omega: 0 };
+  return {
+    vx: (end.x - start.x) / elapsed,
+    vy: (end.y - start.y) / elapsed,
+    omega: (shortestAngleDelta(start.angle, end.angle) * Math.PI) / 180 / elapsed,
+  };
+}
+
+function swerveModuleStates(settings: Settings, velocity: RobotVelocity, headingDegrees: number): SwerveModuleState[] {
+  const length = safePositive(settings.robotLengthMeters, DEFAULT_SETTINGS.robotLengthMeters);
+  const width = safePositive(settings.robotWidthMeters, DEFAULT_SETTINGS.robotWidthMeters);
+  const wheelLength = clamp(settings.swerveWheelLengthMeters, 0.02, length * 0.5);
+  const wheelWidth = clamp(settings.swerveWheelWidthMeters, 0.01, width * 0.3);
+  const offsetX = clamp(settings.swerveModuleOffsetXMeters, 0, length / 2);
+  const offsetY = clamp(settings.swerveModuleOffsetYMeters, 0, width / 2);
+  const heading = (headingDegrees * Math.PI) / 180;
+  const cos = Math.cos(heading);
+  const sin = Math.sin(heading);
+  const robotVx = cos * velocity.vx + sin * velocity.vy;
+  const robotVy = -sin * velocity.vx + cos * velocity.vy;
+  const positions = [
+    { id: "front-left", x: length - offsetX, y: offsetY },
+    { id: "front-right", x: length - offsetX, y: width - offsetY },
+    { id: "rear-left", x: offsetX, y: offsetY },
+    { id: "rear-right", x: offsetX, y: width - offsetY },
+  ];
+
+  return positions.map((position) => {
+    const moduleX = position.x - clamp(settings.centerOfRotationX, 0, length);
+    const moduleY = clamp(settings.centerOfRotationY, 0, width) - position.y;
+    const moduleVx = robotVx - velocity.omega * moduleY;
+    const moduleVy = robotVy + velocity.omega * moduleX;
+    const speed = Math.hypot(moduleVx, moduleVy);
+    return {
+      id: position.id,
+      xPercent: (position.x / length) * 100,
+      yPercent: (position.y / width) * 100,
+      lengthPercent: (wheelLength / length) * 100,
+      widthPercent: (wheelWidth / width) * 100,
+      angleDegrees: speed < 0.001 ? 0 : (Math.atan2(moduleVy, moduleVx) * 180) / Math.PI,
+      speed,
+    };
+  });
+}
+
+function SwerveModules({ settings, velocity, headingDegrees }: { settings: Settings; velocity: RobotVelocity; headingDegrees: number }): ReactElement {
+  const modules = swerveModuleStates(settings, velocity, headingDegrees);
+  const maxSpeed = Math.max(0.001, ...modules.map((module) => module.speed));
+  return (
+    <div className="swerve-modules" aria-hidden="true">
+      {modules.map((module) => (
+        <i
+          key={module.id}
+          className="swerve-module"
+          style={{
+            left: `${module.xPercent}%`,
+            top: `${module.yPercent}%`,
+            width: `${module.lengthPercent}%`,
+            height: `${module.widthPercent}%`,
+            opacity: 0.62 + (module.speed / maxSpeed) * 0.38,
+            transform: `translate(-50%, -50%) rotate(${compassDegreesToCssRotation(module.angleDegrees)}deg)`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function formatPlaybackTime(seconds: number): string {
+  const cleanSeconds = Math.max(0, seconds);
+  const minutes = Math.floor(cleanSeconds / 60);
+  return `${minutes}:${(cleanSeconds % 60).toFixed(1).padStart(4, "0")}`;
+}
+
 function nearestPathPositionFromPixel(settings: Settings, size: FieldSize, waypoints: Waypoint[], point: PixelPoint): number {
   if (waypoints.length <= 1) return 0;
 
@@ -775,8 +1381,12 @@ function pathPixelsBetween(settings: Settings, size: FieldSize, waypoints: Waypo
 
 function robotRenderStyle(settings: Settings, size: FieldSize, x: number, y: number, angleDegrees: number): CSSProperties {
   const point = pointToPixels(settings, size, { x, y });
-  const width = settings.robotLengthMeters * (size.width / settings.fieldLengthMeters);
-  const height = settings.robotWidthMeters * (size.height / settings.fieldWidthMeters);
+  const pixelsPerMeter = Math.max(0, Math.min(
+    size.width / safePositive(settings.fieldLengthMeters, DEFAULT_SETTINGS.fieldLengthMeters),
+    size.height / safePositive(settings.fieldWidthMeters, DEFAULT_SETTINGS.fieldWidthMeters),
+  ));
+  const width = settings.robotLengthMeters * pixelsPerMeter;
+  const height = settings.robotWidthMeters * pixelsPerMeter;
   const originX = (clamp(settings.centerOfRotationX, 0, settings.robotLengthMeters) / settings.robotLengthMeters) * width;
   const originY = (clamp(settings.centerOfRotationY, 0, settings.robotWidthMeters) / settings.robotWidthMeters) * height;
 
@@ -801,8 +1411,14 @@ function handoffCircleStyle(settings: Settings, size: FieldSize, waypoint: Waypo
   };
 }
 
-function serializePathData(path: SharedPathData): SerializedPathFile {
+function serializePathData(path: SharedPathData, settings: Settings): SerializedPathFile {
   return {
+    max_translational_velocity: settings.maxTranslationalVelocity,
+    max_translational_acceleration: settings.maxTranslationalAcceleration,
+    max_rotational_velocity: settings.maxRotationalVelocity,
+    max_rotational_acceleration: settings.maxRotationalAcceleration,
+    end_translation_tolerance_meters: settings.endTranslationToleranceMeters,
+    end_rotation_tolerance_deg: settings.endRotationToleranceDegrees,
     waypoints: path.waypoints.map((waypoint) => ({
       x: waypoint.x,
       y: waypoint.y,
@@ -903,7 +1519,11 @@ function serializeAutoConfig(nodes: PathTreeNode[]): SerializedAutoConfig {
 function normalizePersistedState(value: PersistedAppState | null): PersistedAppState | null {
   if (!value || typeof value !== "object") return null;
   return {
-    settings: { ...DEFAULT_SETTINGS, ...value.settings },
+    settings: {
+      ...DEFAULT_SETTINGS,
+      ...value.settings,
+      customTheme: { ...DEFAULT_SETTINGS.customTheme, ...value.settings?.customTheme },
+    },
     treeNodes: Array.isArray(value.treeNodes) ? value.treeNodes : [],
     pathDataByName: value.pathDataByName && typeof value.pathDataByName === "object" ? value.pathDataByName : {},
     activePathNodeId: value.activePathNodeId ?? null,
@@ -938,6 +1558,16 @@ function useElementSize<T extends HTMLElement>(): [RefObject<T | null>, FieldSiz
   return [ref, size];
 }
 
+function LayoutGlyph({ mode }: { mode: LayoutMode }): ReactElement {
+  return (
+    <span className={`layout-glyph layout-glyph-${mode}`} aria-hidden="true">
+      <i />
+      <i />
+      <i />
+    </span>
+  );
+}
+
 const EDITOR_HISTORY_LIMIT = 100;
 const EDITOR_HISTORY_COMMIT_DELAY_MS = 250;
 
@@ -954,10 +1584,11 @@ function isTextEditingTarget(target: EventTarget | null): boolean {
 
 function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const appRef = useRef<HTMLDivElement>(null);
+  const workspaceRef = useRef<HTMLElement>(null);
   const leftPanelRef = useRef<HTMLDivElement>(null);
-  const treeViewportRef = useRef<HTMLDivElement>(null);
   const [fieldOneRef, fieldOneSize] = useElementSize<HTMLDivElement>();
   const [fieldTwoRef, fieldTwoSize] = useElementSize<HTMLDivElement>();
+  const [treeViewportRef, treeViewportSize] = useElementSize<HTMLDivElement>();
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [treeNodes, setTreeNodes] = useState<PathTreeNode[]>([]);
   const [pathDataByName, setPathDataByName] = useState<Record<string, SharedPathData>>({});
@@ -965,24 +1596,41 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const [activePathNodeId, setActivePathNodeId] = useState<string | null>(null);
   const [addElementKind, setAddElementKind] = useState<AddElementKind>("waypoint");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [saveMenuOpen, setSaveMenuOpen] = useState(false);
   const [treeAddMenuOpen, setTreeAddMenuOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [pendingConnection, setPendingConnection] = useState<PendingTreeConnection | null>(null);
   const [modal, setModal] = useState<ElementModalState>(null);
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>({ kind: "idle", message: "" });
+  const [playbackOpen, setPlaybackOpen] = useState(false);
+  const [playbackPlaying, setPlaybackPlaying] = useState(false);
+  const [playbackTime, setPlaybackTime] = useState(0);
+  const [playbackModalPosition, setPlaybackModalPosition] = useState<PixelPoint>({ x: 28, y: 84 });
+  const [saveStatus, setSaveStatusState] = useState<SaveStatus>({ kind: "idle", message: "" });
+  const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([]);
+  const [activityLogOpen, setActivityLogOpen] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [pan, setPan] = useState<PixelPoint>({ x: 0, y: 0 });
+  const [treeModalRect, setTreeModalRect] = useState<TreeModalRect>({ x: 420, y: 18, width: 520, height: 520 });
+  const [treeModalMinimized, setTreeModalMinimized] = useState(false);
+  const [selectedTreeNodeId, setSelectedTreeNodeId] = useState<string | null>(null);
+  const [liveVelocity, setLiveVelocity] = useState<RobotVelocity>({ vx: 0, vy: 0, omega: 0 });
+  const [livePoseTrail, setLivePoseTrail] = useState<Pose2d[]>([]);
   const [renamingNodeId, setRenamingNodeId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [nt4AddressDraft, setNt4AddressDraft] = useState(nt4Address);
   const persistTimerRef = useRef<number | null>(null);
   const autoSaveTimerRef = useRef<number | null>(null);
   const historyCommitTimerRef = useRef<number | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
   const editorHistoryRef = useRef<EditorHistory | null>(null);
   const editorSnapshotRef = useRef<EditorSnapshot>({ treeNodes, pathDataByName, activePathNodeId });
   const applyingHistoryRef = useRef(false);
   const [, setHistoryRevision] = useState(0);
+  const playbackAnimationFrameRef = useRef<number | null>(null);
+  const treeClipboardRef = useRef<TreeClipboardSnapshot | null>(null);
+  const clipboardPasteCountRef = useRef(0);
+  const previousLivePoseRef = useRef<{ pose: Pose2d; timestamp: number } | null>(null);
   const draggingModalRef = useRef<{ offsetX: number; offsetY: number } | null>(null);
   const dragOperationRef = useRef<(() => void) | null>(null);
   const [connected] = useEntry<boolean>("/AdvantageKit/DriverStation/DSAttached", false);
@@ -991,6 +1639,16 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     new Uint8Array([...new Array(24).fill(0)]),
   );
   const [, setSelectedAutoEntry] = useEntry<string>("/Voyager/SelectedAuto", "");
+
+  const setSaveStatus = useCallback((status: SaveStatus): void => {
+    setSaveStatusState(status);
+    if (!status.message.trim()) return;
+    setActivityLog((entries) => [...entries, {
+      ...status,
+      id: createId("activity"),
+      timestamp: Date.now(),
+    }]);
+  }, []);
 
   useEffect(() => {
     setNt4AddressDraft(nt4Address);
@@ -1005,7 +1663,16 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const activePathName = activePathNode?.name ?? null;
   const activePathData = activePathName ? pathDataByName[activePathName] ?? createEmptyPathData() : createEmptyPathData();
   const activeMaxPosition = maxPathPosition(activePathData);
-  const livePose = connected ? parsePose2d(poseStruct) : { x: 0, y: 0, rotation: 0 };
+  const playbackPlan = useMemo(() => buildPlaybackPlan(activePathData, settings), [activePathData, settings]);
+  const playbackPose = useMemo(
+    () => poseAtPlaybackTime(activePathData, playbackPlan, playbackTime),
+    [activePathData, playbackPlan, playbackTime],
+  );
+  const playbackVelocity = useMemo(
+    () => playbackVelocityAtTime(activePathData, playbackPlan, playbackTime),
+    [activePathData, playbackPlan, playbackTime],
+  );
+  const livePose: Pose2d = connected ? parsePose2d(poseStruct) : { x: 0, y: 0, rotation: 0 };
   const pxPerMeter = fieldOneSize.width > 0 ? fieldOneSize.width / settings.fieldLengthMeters : 0;
   const selectedRoutineCode = useMemo(() => selectedRoutineCodeFromNodes(treeNodes), [treeNodes]);
   const selectedRoutineWaypointPreviews = useMemo(() => {
@@ -1023,6 +1690,147 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       }));
     });
   }, [pathDataByName, treeNodes]);
+
+  const activeTheme = useMemo<ThemePalette>(() => {
+    if (settings.themePreset === "custom") return settings.customTheme;
+    return THEME_PRESETS.find((preset) => preset.id === settings.themePreset)?.palette ?? DEFAULT_THEME.palette;
+  }, [settings.customTheme, settings.themePreset]);
+  const appThemeStyle = useMemo<CSSProperties>(() => ({
+    "--bg": activeTheme.background,
+    "--panel": activeTheme.panel,
+    "--panel-2": activeTheme.panel2,
+    "--panel-3": activeTheme.panel3,
+    "--border": activeTheme.border,
+    "--border-strong": activeTheme.borderStrong,
+    "--text": activeTheme.text,
+    "--muted": activeTheme.muted,
+    "--faint": activeTheme.faint,
+    "--accent": activeTheme.accent,
+    "--accent-2": activeTheme.accent2,
+    "--warn": activeTheme.warn,
+    "--danger": activeTheme.danger,
+    "--success": activeTheme.success,
+    "--background": activeTheme.background,
+    "--foreground": activeTheme.text,
+    "--card": activeTheme.panel,
+    "--card-foreground": activeTheme.text,
+    "--popover": activeTheme.panel2,
+    "--popover-foreground": activeTheme.text,
+    "--primary": activeTheme.accent,
+    "--primary-foreground": activeTheme.background,
+    "--secondary": activeTheme.panel3,
+    "--secondary-foreground": activeTheme.text,
+    "--muted-foreground": activeTheme.muted,
+    "--destructive": activeTheme.danger,
+    "--input": activeTheme.border,
+    "--ring": activeTheme.accent2,
+  } as CSSProperties), [activeTheme]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    Object.entries(appThemeStyle).forEach(([property, value]) => {
+      if (typeof value === "string" || typeof value === "number") root.style.setProperty(property, String(value));
+    });
+  }, [appThemeStyle]);
+
+  useEffect(() => {
+    if (settings.layoutMode !== "focus") return;
+    const workspace = workspaceRef.current;
+    if (!workspace) return;
+    const bounds = workspace.getBoundingClientRect();
+    const width = clamp(bounds.width * 0.4, 340, Math.min(560, bounds.width - 36));
+    const height = clamp(bounds.height * 0.62, 260, Math.max(260, bounds.height - 36));
+    setTreeModalRect({ x: Math.max(18, bounds.width - width - 18), y: 18, width, height });
+    setTreeModalMinimized(false);
+  }, [settings.layoutMode]);
+
+  const pathTreeNodes = useMemo(
+    () => treeNodes.filter((node): node is PathTreePathNode => node.kind === "path"),
+    [treeNodes],
+  );
+  const visiblePathNodeCount = useMemo(() => pathTreeNodes.filter((node) => {
+    const screenX = node.x + pan.x;
+    const screenY = node.y + pan.y;
+    return screenX + NODE_WIDTH > 0
+      && screenX < treeViewportSize.width
+      && screenY + NODE_HEIGHT > 0
+      && screenY < treeViewportSize.height;
+  }).length, [pan.x, pan.y, pathTreeNodes, treeViewportSize.height, treeViewportSize.width]);
+
+  useEffect(() => {
+    setPlaybackPlaying(false);
+    setPlaybackTime(0);
+  }, [activePathName]);
+
+  useEffect(() => {
+    setPlaybackTime((current) => clamp(current, 0, playbackPlan.totalDuration));
+    if (playbackPlan.totalDuration <= 0) setPlaybackPlaying(false);
+  }, [playbackPlan.totalDuration]);
+
+  useEffect(() => {
+    if (!playbackOpen || !playbackPlaying || playbackPlan.totalDuration <= 0) return;
+
+    let previousTimestamp = performance.now();
+    const tick = (timestamp: number): void => {
+      const elapsedSeconds = Math.max(0, (timestamp - previousTimestamp) / 1000);
+      previousTimestamp = timestamp;
+      setPlaybackTime((current) => (current + elapsedSeconds) % playbackPlan.totalDuration);
+      playbackAnimationFrameRef.current = window.requestAnimationFrame(tick);
+    };
+
+    playbackAnimationFrameRef.current = window.requestAnimationFrame(tick);
+    return () => {
+      if (playbackAnimationFrameRef.current !== null) window.cancelAnimationFrame(playbackAnimationFrameRef.current);
+      playbackAnimationFrameRef.current = null;
+    };
+  }, [playbackOpen, playbackPlan.totalDuration, playbackPlaying]);
+
+  useEffect(() => {
+    if (!connected || !Number.isFinite(livePose.x) || !Number.isFinite(livePose.y) || !Number.isFinite(livePose.rotation)) {
+      previousLivePoseRef.current = null;
+      setLiveVelocity({ vx: 0, vy: 0, omega: 0 });
+      return;
+    }
+
+    const timestamp = performance.now();
+    const previous = previousLivePoseRef.current;
+    if (previous) {
+      const elapsed = (timestamp - previous.timestamp) / 1000;
+      if (elapsed >= 0.005 && elapsed <= 1) {
+        setLiveVelocity({
+          vx: (livePose.x - previous.pose.x) / elapsed,
+          vy: (livePose.y - previous.pose.y) / elapsed,
+          omega: (shortestAngleDelta(
+            (previous.pose.rotation * 180) / Math.PI,
+            (livePose.rotation * 180) / Math.PI,
+          ) * Math.PI) / 180 / elapsed,
+        });
+      }
+    }
+    previousLivePoseRef.current = { pose: livePose, timestamp };
+    setLivePoseTrail((trail) => {
+      const last = trail.at(-1);
+      if (last && distanceBetween(last, livePose) < 0.01 && Math.abs(shortestAngleDelta(
+        (last.rotation * 180) / Math.PI,
+        (livePose.rotation * 180) / Math.PI,
+      )) < 0.5) return trail;
+      return [...trail, livePose];
+    });
+  }, [connected, livePose.rotation, livePose.x, livePose.y]);
+
+  useLayoutEffect(() => {
+    if (!contextMenu) return;
+    const menu = contextMenuRef.current;
+    const app = appRef.current;
+    if (!menu || !app) return;
+    const menuRect = menu.getBoundingClientRect();
+    const appRect = app.getBoundingClientRect();
+    const padding = 8;
+    const nextX = clamp(contextMenu.x, padding, Math.max(padding, appRect.width - menuRect.width - padding));
+    const nextY = clamp(contextMenu.y, padding, Math.max(padding, appRect.height - menuRect.height - padding));
+    if (Math.abs(nextX - contextMenu.x) < 0.5 && Math.abs(nextY - contextMenu.y) < 0.5) return;
+    setContextMenu((current) => current ? { ...current, x: nextX, y: nextY } : current);
+  }, [contextMenu]);
 
   const currentEditorSnapshot = useMemo<EditorSnapshot>(() => ({
     treeNodes,
@@ -1276,7 +2084,74 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     [pathDataByName, treeNodes],
   );
 
+  const insertTreeSnapshot = useCallback((snapshot: TreeClipboardSnapshot, message: string): void => {
+    clipboardPasteCountRef.current += 1;
+    const offset = 48 * clipboardPasteCountRef.current;
+    const instantiated = instantiateTreeSnapshot(snapshot, treeNodes, offset);
+    setTreeNodes((previous) => [...previous, ...instantiated.nodes]);
+    setPathDataByName((previous) => ({ ...previous, ...instantiated.pathDataByName }));
+    setSelectedTreeNodeId(instantiated.rootId);
+    setContextMenu(null);
+    setSaveStatus({ kind: "saved", message });
+  }, [treeNodes]);
+
+  const copySelectedTree = useCallback((): void => {
+    if (!selectedTreeNodeId) {
+      setSaveStatus({ kind: "error", message: "Select a path-tree block before copying." });
+      return;
+    }
+    const snapshot = copyTreeSnapshot(selectedTreeNodeId, treeNodes, pathDataByName, true);
+    if (!snapshot) {
+      setSaveStatus({ kind: "error", message: "The selected path-tree block could not be copied." });
+      return;
+    }
+    treeClipboardRef.current = snapshot;
+    clipboardPasteCountRef.current = 0;
+    setSaveStatus({
+      kind: "saved",
+      message: `Copied ${snapshot.nodes.length} path-tree block${snapshot.nodes.length === 1 ? "" : "s"}, including children.`,
+    });
+  }, [pathDataByName, selectedTreeNodeId, treeNodes]);
+
+  const pasteCopiedTree = useCallback((): void => {
+    const snapshot = treeClipboardRef.current;
+    if (!snapshot) {
+      setSaveStatus({ kind: "error", message: "Copy a path-tree sequence with Ctrl+C before pasting." });
+      return;
+    }
+    insertTreeSnapshot(
+      snapshot,
+      `Pasted ${snapshot.nodes.length} path-tree block${snapshot.nodes.length === 1 ? "" : "s"} as a new sequence.`,
+    );
+  }, [insertTreeSnapshot]);
+
+  const duplicateSelectedTreeNode = useCallback((): void => {
+    if (!selectedTreeNodeId) {
+      setSaveStatus({ kind: "error", message: "Select a path-tree block before duplicating." });
+      return;
+    }
+    const snapshot = copyTreeSnapshot(selectedTreeNodeId, treeNodes, pathDataByName, false);
+    if (!snapshot) return;
+    clipboardPasteCountRef.current = 0;
+    insertTreeSnapshot(snapshot, "Duplicated the selected path-tree block without its children.");
+  }, [insertTreeSnapshot, pathDataByName, selectedTreeNodeId, treeNodes]);
+
+  useEffect(() => {
+    const onTreeClipboardKeyDown = (event: KeyboardEvent): void => {
+      if (!event.ctrlKey || event.altKey || event.metaKey || isTextEditingTarget(event.target)) return;
+      const key = event.key.toLowerCase();
+      if (key !== "c" && key !== "v" && key !== "d") return;
+      event.preventDefault();
+      if (key === "c") copySelectedTree();
+      else if (key === "v") pasteCopiedTree();
+      else duplicateSelectedTreeNode();
+    };
+    window.addEventListener("keydown", onTreeClipboardKeyDown);
+    return () => window.removeEventListener("keydown", onTreeClipboardKeyDown);
+  }, [copySelectedTree, duplicateSelectedTreeNode, pasteCopiedTree]);
+
   const deleteNode = useCallback((nodeId: string): void => {
+    const deletedIds = collectSubtreeNodeIds(nodeId, treeNodes);
     setTreeNodes((previous) => {
       const nodeToDelete = previous.find((node) => node.id === nodeId);
       if (!nodeToDelete) return previous;
@@ -1301,9 +2176,31 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
           return next;
         });
     });
-    if (activePathNodeId === nodeId) setActivePathNodeId(null);
+    if (activePathNodeId && deletedIds.has(activePathNodeId)) setActivePathNodeId(null);
+    if (selectedTreeNodeId && deletedIds.has(selectedTreeNodeId)) setSelectedTreeNodeId(null);
     setContextMenu(null);
-  }, [activePathNodeId]);
+  }, [activePathNodeId, selectedTreeNodeId, treeNodes]);
+
+  useEffect(() => {
+    const onDeleteSelectedNode = (event: KeyboardEvent): void => {
+      if (
+        event.repeat
+        || (event.key !== "Delete" && event.key !== "Backspace")
+        || isTextEditingTarget(event.target)
+        || settingsOpen
+        || preferencesOpen
+        || activityLogOpen
+        || !selectedTreeNodeId
+      ) return;
+      const selectedNode = treeNodes.find((node) => node.id === selectedTreeNodeId);
+      if (!selectedNode) return;
+      event.preventDefault();
+      deleteNode(selectedNode.id);
+      setSaveStatus({ kind: "saved", message: `Deleted ${selectedNode.name} and its child sequence.` });
+    };
+    window.addEventListener("keydown", onDeleteSelectedNode);
+    return () => window.removeEventListener("keydown", onDeleteSelectedNode);
+  }, [activityLogOpen, deleteNode, preferencesOpen, selectedTreeNodeId, settingsOpen, treeNodes]);
 
   const startRename = useCallback((node: PathTreeNode): void => {
     setRenamingNodeId(node.id);
@@ -1558,7 +2455,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       if (addElementKind === "eventTrigger") {
         return { ...current, events: [...current.events, createDefaultEventTrigger(currentMaxPosition)] };
       }
-      return { ...current, constraintZones: [...current.constraintZones, createDefaultConstraintZone(currentMaxPosition)] };
+      return { ...current, constraintZones: [...current.constraintZones, createDefaultConstraintZone(currentMaxPosition, settings)] };
     });
   }, [activePathName, addElementKind, settings, setError, updateActivePathData]);
 
@@ -1847,6 +2744,70 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     };
   }, [pan.x, pan.y]);
 
+  const beginTreeModalDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (settings.layoutMode !== "focus" || (event.target as HTMLElement).closest("button, input, .tree-add-wrapper")) return;
+    const workspace = workspaceRef.current;
+    if (!workspace) return;
+    event.preventDefault();
+    const bounds = workspace.getBoundingClientRect();
+    const startPointer = { x: event.clientX, y: event.clientY };
+    const startRect = treeModalRect;
+
+    const onPointerMove = (moveEvent: PointerEvent): void => {
+      const nextX = clamp(startRect.x + moveEvent.clientX - startPointer.x, 0, Math.max(0, bounds.width - startRect.width));
+      const nextY = clamp(startRect.y + moveEvent.clientY - startPointer.y, 0, Math.max(0, bounds.height - 42));
+      setTreeModalRect((current) => ({ ...current, x: nextX, y: nextY }));
+    };
+    const onPointerUp = (): void => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+  }, [settings.layoutMode, treeModalRect]);
+
+  const beginTreeModalResize = useCallback((event: ReactPointerEvent<HTMLButtonElement>): void => {
+    if (settings.layoutMode !== "focus" || treeModalMinimized) return;
+    const workspace = workspaceRef.current;
+    if (!workspace) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const bounds = workspace.getBoundingClientRect();
+    const startPointer = { x: event.clientX, y: event.clientY };
+    const startRect = treeModalRect;
+
+    const onPointerMove = (moveEvent: PointerEvent): void => {
+      setTreeModalRect((current) => ({
+        ...current,
+        width: clamp(startRect.width + moveEvent.clientX - startPointer.x, 320, Math.max(320, bounds.width - startRect.x)),
+        height: clamp(startRect.height + moveEvent.clientY - startPointer.y, 230, Math.max(230, bounds.height - startRect.y)),
+      }));
+    };
+    const onPointerUp = (): void => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+  }, [settings.layoutMode, treeModalMinimized, treeModalRect]);
+
+  const toggleTreeModalMinimized = useCallback((): void => {
+    setTreeModalMinimized((minimized) => {
+      if (minimized) {
+        const workspace = workspaceRef.current;
+        if (workspace) {
+          const bounds = workspace.getBoundingClientRect();
+          setTreeModalRect((rect) => ({
+            ...rect,
+            x: clamp(rect.x, 0, Math.max(0, bounds.width - rect.width)),
+            y: clamp(rect.y, 0, Math.max(0, bounds.height - rect.height)),
+          }));
+        }
+      }
+      return !minimized;
+    });
+  }, []);
+
   const resetTreePan = useCallback((event: ReactMouseEvent<HTMLDivElement>): void => {
     const target = event.target as HTMLElement;
     if (target.closest(".tree-node, .tree-menu, .tree-add-menu, .tree-edge-label")) return;
@@ -1854,6 +2815,30 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     setPan({ x: 0, y: 0 });
     setSaveStatus({ kind: "saved", message: "Returned the path tree canvas to the origin." });
   }, []);
+
+  const focusNearestPathNode = useCallback((): void => {
+    if (pathTreeNodes.length === 0) {
+      setSaveStatus({ kind: "error", message: "Add a path block before using path recovery." });
+      return;
+    }
+
+    const viewportCenter = {
+      x: treeViewportSize.width / 2 - pan.x,
+      y: treeViewportSize.height / 2 - pan.y,
+    };
+    const nearest = pathTreeNodes.reduce((best, node) => {
+      const bestDistance = Math.hypot(best.x + NODE_WIDTH / 2 - viewportCenter.x, best.y + NODE_HEIGHT / 2 - viewportCenter.y);
+      const nodeDistance = Math.hypot(node.x + NODE_WIDTH / 2 - viewportCenter.x, node.y + NODE_HEIGHT / 2 - viewportCenter.y);
+      return nodeDistance < bestDistance ? node : best;
+    });
+
+    setPan({
+      x: treeViewportSize.width / 2 - nearest.x - NODE_WIDTH / 2,
+      y: treeViewportSize.height / 2 - nearest.y - NODE_HEIGHT / 2,
+    });
+    setContextMenu(null);
+    setSaveStatus({ kind: "saved", message: `Centered the nearest path block: ${nearest.name}.` });
+  }, [pan.x, pan.y, pathTreeNodes, treeViewportSize.height, treeViewportSize.width]);
 
   const beginNodeDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>, node: PathTreeNode): void => {
     event.stopPropagation();
@@ -1876,7 +2861,10 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
         connectPendingToNode(node.id);
         return;
       }
-      if (!moved && node.kind === "path") activatePathNode(node.id);
+      if (!moved) {
+        setSelectedTreeNodeId(node.id);
+        if (node.kind === "path") activatePathNode(node.id);
+      }
     };
 
     window.addEventListener("pointermove", onPointerMove);
@@ -1906,6 +2894,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const showNodeMenu = useCallback((event: ReactMouseEvent<HTMLDivElement>, nodeId: string): void => {
     event.preventDefault();
     event.stopPropagation();
+    setSelectedTreeNodeId(nodeId);
     const appRect = appRef.current?.getBoundingClientRect();
     const treeRect = treeViewportRef.current?.getBoundingClientRect();
     if (!appRect || !treeRect) return;
@@ -1969,6 +2958,42 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     };
   }, [modal]);
 
+  const togglePlaybackModal = useCallback((): void => {
+    if (playbackOpen) setPlaybackPlaying(false);
+    setPlaybackOpen((open) => !open);
+  }, [playbackOpen]);
+
+  const beginPlaybackModalDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>): void => {
+    if ((event.target as HTMLElement).closest("button, input")) return;
+    const appRect = appRef.current?.getBoundingClientRect();
+    if (!appRect) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const offset = {
+      x: event.clientX - appRect.left - playbackModalPosition.x,
+      y: event.clientY - appRect.top - playbackModalPosition.y,
+    };
+
+    const onPointerMove = (moveEvent: PointerEvent): void => {
+      setPlaybackModalPosition({
+        x: clamp(moveEvent.clientX - appRect.left - offset.x, 4, Math.max(4, appRect.width - 564)),
+        y: clamp(moveEvent.clientY - appRect.top - offset.y, 44, Math.max(44, appRect.height - 190)),
+      });
+    };
+    const onPointerUp = (): void => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      dragOperationRef.current = null;
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    dragOperationRef.current = () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+  }, [playbackModalPosition.x, playbackModalPosition.y]);
+
   const readImageFile = useCallback((event: ChangeEvent<HTMLInputElement>): void => {
     const file = event.currentTarget.files?.[0];
     if (!file) return;
@@ -2018,15 +3043,17 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       return;
     }
 
+    setLivePoseTrail(connected ? [livePose] : []);
+    previousLivePoseRef.current = connected ? { pose: livePose, timestamp: performance.now() } : null;
     setSelectedAutoEntry(selectedRoutineCode);
     setSaveStatus({ kind: "saved", message: `Published routine ${selectedRoutineCode} to /Voyager/SelectedAuto.` });
-  }, [selectedRoutineCode, setError, setSelectedAutoEntry]);
+  }, [connected, livePose.rotation, livePose.x, livePose.y, selectedRoutineCode, setError, setSelectedAutoEntry]);
 
   const savePathByName = useCallback(async (pathName: string): Promise<void> => {
     const data = pathDataByName[pathName] ?? createEmptyPathData();
-    await writeTextFile(`${sanitizeFileName(pathName)}.json`, `${JSON.stringify(serializePathData(data), null, 2)}\n`);
+    await writeTextFile(`${sanitizeFileName(pathName)}.json`, `${JSON.stringify(serializePathData(data, settings), null, 2)}\n`);
     setKnownPathFileNames((current) => current.includes(pathName) ? current : [...current, pathName]);
-  }, [pathDataByName, writeTextFile]);
+  }, [pathDataByName, settings, writeTextFile]);
 
   const deletePathFileByName = useCallback(async (pathName: string): Promise<void> => {
     await deleteTextFile(`${sanitizeFileName(pathName)}.json`);
@@ -2107,11 +3134,12 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const activeConstraintZoneModal = modal?.kind === "constraintZone" ? activePathData.constraintZones.find((zone) => zone.id === modal.id) ?? null : null;
 
   return (
-    <div ref={appRef} className="voyager-app" onClick={closeMenus}>
+    <div ref={appRef} className={`voyager-app layout-${settings.layoutMode}`} style={appThemeStyle} onClick={closeMenus}>
       <header className="voyager-nav">
         <div className="nav-left">
           <div className="app-icon" aria-hidden="true">V</div>
           <strong className="app-name">Voyager</strong>
+          <span className="version-chip">2.4.2</span>
           <div className="save-control" onClick={(event) => event.stopPropagation()}>
             <button className="nav-button" type="button" onClick={() => setSaveMenuOpen((open) => !open)}>
               Save <span aria-hidden="true">▾</span>
@@ -2134,22 +3162,88 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
           <button className="nav-button" type="button" onClick={(event) => { event.stopPropagation(); setSettingsOpen(true); }}>
             Settings
           </button>
-          <span className={`save-status save-status-${saveStatus.kind}`} title={saveStatus.message}>{saveStatus.message}</span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="nav-button preferences-button"
+            onClick={(event) => {
+              event.stopPropagation();
+              setPreferencesOpen(true);
+            }}
+          >
+            <Palette data-icon="inline-start" />
+            Preferences
+          </Button>
+          <div className="layout-switcher" aria-label="Workspace layout" onClick={(event) => event.stopPropagation()}>
+            <span className="layout-switcher-label">Layout</span>
+            {([
+              { mode: "default", title: "Fields left, path tree right" },
+              { mode: "horizontal", title: "Fields top, path tree bottom" },
+              { mode: "mirrored", title: "Path tree left, fields right" },
+              { mode: "focus", title: "Auto focus with floating live field and path tree" },
+            ] as Array<{ mode: LayoutMode; title: string }>).map(({ mode, title }) => (
+              <button
+                key={mode}
+                type="button"
+                className={`layout-button ${settings.layoutMode === mode ? "is-active" : ""}`}
+                aria-label={title}
+                aria-pressed={settings.layoutMode === mode}
+                title={title}
+                onClick={() => updateSettings({ layoutMode: mode })}
+              >
+                <LayoutGlyph mode={mode} />
+              </button>
+            ))}
+          </div>
+          <div className={`status-activity ${saveStatus.message ? "has-message" : ""}`} onClick={(event) => event.stopPropagation()}>
+            <span className={`save-status save-status-${saveStatus.kind}`} title={saveStatus.message}>{saveStatus.message}</span>
+            <button
+              className="activity-log-reveal"
+              type="button"
+              aria-label="Open activity log"
+              title="Open activity log"
+              onClick={() => setActivityLogOpen(true)}
+            >
+              <History aria-hidden="true" />
+            </button>
+          </div>
         </div>
       </header>
 
-      <main className="workspace">
+      <main ref={workspaceRef} className="workspace">
         <section ref={leftPanelRef} className="left-panel">
-          <section className="field-card">
+          <section className="field-card auto-field-card">
             <div className="field-toolbar">
               <div>
                 <h2>Auto maker field</h2>
                 <p>{activePathName ? `Editing ${activePathName}` : "Select a path block to edit"}</p>
               </div>
               <div className="field-actions">
+                {settings.layoutMode === "focus" ? (
+                  <div className="focus-connection-actions">
+                    <span className={`connection-pill ${connected ? "connected" : "disconnected"}`}>{connected ? "connected" : "offline"}</span>
+                    <button
+                      className="publish-routine-button"
+                      type="button"
+                      title={selectedRoutineCode ? `Publish ${selectedRoutineCode} to /Voyager/SelectedAuto` : "Select a routine in the path tree first"}
+                      onClick={publishSelectedRoutine}
+                    >
+                      Publish Routine
+                    </button>
+                  </div>
+                ) : null}
                 <div className="history-actions" aria-label="Editor history controls">
                   <button type="button" onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)">Undo</button>
                   <button type="button" onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Y)">Redo</button>
+                  <button
+                    type="button"
+                    className={playbackOpen ? "is-active" : ""}
+                    aria-pressed={playbackOpen}
+                    onClick={togglePlaybackModal}
+                    title="Toggle looping path playback"
+                  >
+                    Playback
+                  </button>
                 </div>
                 <select value={addElementKind} onChange={(event) => setAddElementKind(event.target.value as AddElementKind)}>
                   <option value="waypoint">Waypoint</option>
@@ -2161,7 +3255,8 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
               </div>
             </div>
 
-            <div ref={fieldOneRef} className={`field-surface ${settings.fieldImageDataUrl ? "has-field-image" : ""}`} style={fieldBackgroundStyle}>
+            <div className="field-scroll-shell" aria-label="Scrollable autonomous field">
+              <div ref={fieldOneRef} className={`field-surface ${settings.fieldImageDataUrl ? "has-field-image" : ""}`} style={fieldBackgroundStyle}>
               {!settings.fieldImageDataUrl ? <div className="field-placeholder">Field image<br />{formatNumber(settings.fieldLengthMeters)} × {formatNumber(settings.fieldWidthMeters)} m</div> : null}
               <svg className="field-svg" viewBox={`0 0 ${Math.max(1, fieldOneSize.width)} ${Math.max(1, fieldOneSize.height)}`}>
                 {activePathData.waypoints.slice(1).map((waypoint, index) => {
@@ -2293,10 +3388,48 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                   </React.Fragment>
                 );
               })}
+
+              {settings.layoutMode === "focus" ? (
+                <>
+                  {livePoseTrail.length > 1 ? (
+                    <svg className="field-svg live-trail-svg" viewBox={`0 0 ${Math.max(1, fieldOneSize.width)} ${Math.max(1, fieldOneSize.height)}`} aria-hidden="true">
+                      <polyline
+                        className="live-pose-trail"
+                        points={livePoseTrail.map((pose) => {
+                          const point = pointToPixels(settings, fieldOneSize, pose);
+                          return `${point.x},${point.y}`;
+                        }).join(" ")}
+                      />
+                    </svg>
+                  ) : null}
+                  <div
+                    className="robot-marker live-robot-marker focus-live-robot-marker"
+                    style={robotRenderStyle(settings, fieldOneSize, livePose.x, livePose.y, normalizeCompassDegrees((livePose.rotation * 180) / Math.PI))}
+                    aria-label={connected ? "Connected live robot pose" : "Disconnected robot pose at 0,0"}
+                  >
+                    <SwerveModules
+                      settings={settings}
+                      velocity={liveVelocity}
+                      headingDegrees={normalizeCompassDegrees((livePose.rotation * 180) / Math.PI)}
+                    />
+                  </div>
+                </>
+              ) : null}
+
+              {playbackOpen && playbackPose ? (
+                <div
+                  className="robot-marker playback-robot-marker"
+                  style={robotRenderStyle(settings, fieldOneSize, playbackPose.x, playbackPose.y, playbackPose.angle)}
+                  aria-label={`Path preview robot at ${formatPlaybackTime(playbackTime)}`}
+                >
+                  <SwerveModules settings={settings} velocity={playbackVelocity} headingDegrees={playbackPose.angle} />
+                </div>
+              ) : null}
+              </div>
             </div>
           </section>
 
-          <section className="field-card">
+          <section className="field-card live-field-card">
             <div className="field-toolbar">
               <div>
                 <h2>Live robot position</h2>
@@ -2314,7 +3447,8 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                 </button>
               </div>
             </div>
-            <div ref={fieldTwoRef} className={`field-surface ${settings.fieldImageDataUrl ? "has-field-image" : ""}`} style={fieldBackgroundStyle}>
+            <div className="field-scroll-shell" aria-label="Scrollable live robot field">
+              <div ref={fieldTwoRef} className={`field-surface ${settings.fieldImageDataUrl ? "has-field-image" : ""}`} style={fieldBackgroundStyle}>
               {!settings.fieldImageDataUrl ? <div className="field-placeholder">Live field<br />{formatNumber(settings.fieldLengthMeters)} × {formatNumber(settings.fieldWidthMeters)} m</div> : null}
               <div
                 className="origin-label"
@@ -2325,11 +3459,27 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
               >
                 (0,0)
               </div>
+              {livePoseTrail.length > 1 ? (
+                <svg className="field-svg live-trail-svg" viewBox={`0 0 ${Math.max(1, fieldTwoSize.width)} ${Math.max(1, fieldTwoSize.height)}`} aria-hidden="true">
+                  <polyline
+                    className="live-pose-trail"
+                    points={livePoseTrail.map((pose) => {
+                      const point = pointToPixels(settings, fieldTwoSize, pose);
+                      return `${point.x},${point.y}`;
+                    }).join(" ")}
+                  />
+                </svg>
+              ) : null}
               <div
                 className="robot-marker live-robot-marker"
                 style={robotRenderStyle(settings, fieldTwoSize, livePose.x, livePose.y, normalizeCompassDegrees((livePose.rotation * 180) / Math.PI))}
               >
-                <span>robot</span>
+                <SwerveModules
+                  settings={settings}
+                  velocity={liveVelocity}
+                  headingDegrees={normalizeCompassDegrees((livePose.rotation * 180) / Math.PI)}
+                />
+              </div>
               </div>
             </div>
           </section>
@@ -2338,17 +3488,26 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
         <div
           className="panel-divider"
           role="separator"
-          aria-orientation="vertical"
+          aria-orientation={settings.layoutMode === "horizontal" ? "horizontal" : "vertical"}
           onPointerDown={(event) => {
+            if (settings.layoutMode === "focus") return;
             event.preventDefault();
             const startX = event.clientX;
+            const startY = event.clientY;
             const panel = leftPanelRef.current;
             const workspace = panel?.parentElement;
             if (!panel || !workspace) return;
             const startWidth = panel.getBoundingClientRect().width;
-            const workspaceWidth = workspace.getBoundingClientRect().width;
+            const startHeight = panel.getBoundingClientRect().height;
+            const workspaceBounds = workspace.getBoundingClientRect();
             const onPointerMove = (moveEvent: PointerEvent): void => {
-              const nextWidth = clamp(startWidth + moveEvent.clientX - startX, 260, workspaceWidth - 320);
+              if (settings.layoutMode === "horizontal") {
+                const nextHeight = clamp(startHeight + moveEvent.clientY - startY, 240, workspaceBounds.height - 220);
+                workspace.style.gridTemplateRows = `${nextHeight}px 8px minmax(220px, 1fr)`;
+                return;
+              }
+              const direction = settings.layoutMode === "mirrored" ? -1 : 1;
+              const nextWidth = clamp(startWidth + (moveEvent.clientX - startX) * direction, 260, workspaceBounds.width - 320);
               panel.style.width = `${nextWidth}px`;
             };
             const onPointerUp = (): void => {
@@ -2362,28 +3521,64 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
           <span aria-hidden="true">⋮</span>
         </div>
 
-        <section className="right-panel">
-          <div className="tree-toolbar">
+        <section
+          className={`right-panel ${settings.layoutMode === "focus" ? "focus-tree-modal" : ""} ${treeModalMinimized ? "is-minimized" : ""}`}
+          style={settings.layoutMode === "focus" ? {
+            left: `${treeModalRect.x}px`,
+            top: `${treeModalRect.y}px`,
+            width: `${treeModalRect.width}px`,
+            height: `${treeModalRect.height}px`,
+          } : undefined}
+        >
+          <div className="tree-toolbar" onPointerDown={beginTreeModalDrag}>
             <div className="tree-legend">
+              <strong className="tree-modal-title">Path tree</strong>
               <span><i className="legend-box saved" />saved</span>
               <span><i className="legend-box editing" />editing</span>
               <span><i className="legend-box routine" />selected for routine</span>
             </div>
-            <div className="tree-add-wrapper" onClick={(event) => event.stopPropagation()}>
-              <button className="tree-add-button" type="button" onClick={() => setTreeAddMenuOpen((open) => !open)}>+</button>
-              {treeAddMenuOpen ? (
-                <div className="dropdown-menu tree-add-menu">
-                  <button type="button" onClick={() => addTreeNode("path", 120 - pan.x, 90 - pan.y)}>Path block</button>
-                  <button type="button" onClick={() => addTreeNode("if", 120 - pan.x, 90 - pan.y)}>If block</button>
-                  <button type="button" onClick={() => addTreeNode("loop", 120 - pan.x, 90 - pan.y)}>Loop block</button>
-                  <button type="button" onClick={() => addTreeNode("interrupt", 120 - pan.x, 90 - pan.y)}>Interruptable block</button>
-                  <button type="button" onClick={() => addTreeNode("event", 120 - pan.x, 90 - pan.y)}>Event block</button>
-                </div>
+            <div className="tree-toolbar-actions">
+              {settings.layoutMode === "focus" ? (
+                <button
+                  className="tree-minimize-button"
+                  type="button"
+                  aria-label={treeModalMinimized ? "Restore path tree" : "Minimize path tree"}
+                  title={treeModalMinimized ? "Restore path tree" : "Minimize path tree"}
+                  onClick={toggleTreeModalMinimized}
+                >
+                  {treeModalMinimized ? "□" : "−"}
+                </button>
               ) : null}
+              <Tooltip>
+                <TooltipTrigger render={<Button variant="outline" size="sm" className="tree-locate-button" />} onClick={focusNearestPathNode}>
+                  <LocateFixed data-icon="inline-start" />
+                  Nearest path
+                </TooltipTrigger>
+                <TooltipContent>Center the closest path block in the viewport.</TooltipContent>
+              </Tooltip>
+              <div className="tree-add-wrapper" onClick={(event) => event.stopPropagation()}>
+                <button className="tree-add-button" type="button" onClick={() => setTreeAddMenuOpen((open) => !open)}>+</button>
+                {treeAddMenuOpen ? (
+                  <div className="dropdown-menu tree-add-menu">
+                    <button type="button" onClick={() => addTreeNode("path", 120 - pan.x, 90 - pan.y)}>Path block</button>
+                    <button type="button" onClick={() => addTreeNode("if", 120 - pan.x, 90 - pan.y)}>If block</button>
+                    <button type="button" onClick={() => addTreeNode("loop", 120 - pan.x, 90 - pan.y)}>Loop block</button>
+                    <button type="button" onClick={() => addTreeNode("interrupt", 120 - pan.x, 90 - pan.y)}>Interruptable block</button>
+                    <button type="button" onClick={() => addTreeNode("event", 120 - pan.x, 90 - pan.y)}>Event block</button>
+                  </div>
+                ) : null}
+              </div>
             </div>
           </div>
 
           <div ref={treeViewportRef} className="tree-viewport" onPointerDown={beginTreePan} onDoubleClick={resetTreePan} onContextMenu={showCanvasMenu}>
+            {visiblePathNodeCount === 0 ? (
+              <div className="tree-visibility-warning" role="status">
+                <AlertTriangle aria-hidden="true" />
+                <span>{pathTreeNodes.length === 0 ? "No path blocks exist yet." : "No path blocks are visible."}</span>
+                {pathTreeNodes.length > 0 ? <button type="button" onClick={(event) => { event.stopPropagation(); focusNearestPathNode(); }}>Recover</button> : null}
+              </div>
+            ) : null}
             <svg className="tree-svg" style={{ transform: `translate(${pan.x}px, ${pan.y}px)`, pointerEvents: "auto" }} width="3200" height="2200">
               {treeEdges.map(({ parent, child, label, slot }) => {
                 const start = { x: parent.x + NODE_WIDTH, y: parent.y + NODE_HEIGHT / 2 };
@@ -2411,7 +3606,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
               {treeNodes.map((node) => (
                 <div
                   key={node.id}
-                  className={`tree-node tree-node-${node.kind} ${node.editing ? "is-editing" : ""} ${node.selectedForRoutine ? "is-routine" : ""}`}
+                  className={`tree-node tree-node-${node.kind} ${node.editing ? "is-editing" : ""} ${node.selectedForRoutine ? "is-routine" : ""} ${selectedTreeNodeId === node.id ? "is-selected" : ""}`}
                   style={{
                     left: `${node.x}px`,
                     top: `${node.y}px`,
@@ -2454,11 +3649,146 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
               ))}
             </div>
           </div>
+          {settings.layoutMode === "focus" && !treeModalMinimized ? (
+            <button className="tree-resize-handle" type="button" aria-label="Resize path tree" onPointerDown={beginTreeModalResize} />
+          ) : null}
         </section>
       </main>
 
+      <Dialog open={preferencesOpen} onOpenChange={setPreferencesOpen}>
+        <DialogContent className="preferences-dialog">
+          <DialogHeader className="preferences-header">
+            <div className="preferences-title-icon" aria-hidden="true"><Sparkles /></div>
+            <div>
+              <DialogTitle>Appearance preferences</DialogTitle>
+              <DialogDescription>Choose a Voyager theme or build a custom command-center palette. Changes save automatically.</DialogDescription>
+            </div>
+          </DialogHeader>
+
+          <div className="preferences-scroll">
+            <section className="preferences-section">
+              <div className="preferences-section-heading">
+                <div>
+                  <strong>Theme presets</strong>
+                  <span>Ten tuned palettes with the same Voyager layout and contrast hierarchy.</span>
+                </div>
+                <span className="theme-count">10 presets</span>
+              </div>
+              <div className="theme-preset-grid">
+                {THEME_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    className={`theme-preset-card ${settings.themePreset === preset.id ? "is-selected" : ""}`}
+                    aria-pressed={settings.themePreset === preset.id}
+                    onClick={() => updateSettings({ themePreset: preset.id })}
+                  >
+                    <span className="theme-preset-preview" style={{ background: preset.palette.background }}>
+                      <i style={{ background: preset.palette.panel2 }} />
+                      <i style={{ background: preset.palette.accent }} />
+                      <i style={{ background: preset.palette.accent2 }} />
+                    </span>
+                    <span className="theme-preset-copy">
+                      <strong>{preset.name}</strong>
+                      <small>{preset.description}</small>
+                    </span>
+                    {settings.themePreset === preset.id ? <span className="theme-selected-dot" aria-label="Selected" /> : null}
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="preferences-section custom-theme-section">
+              <div className="preferences-section-heading">
+                <div>
+                  <strong>Custom theme</strong>
+                  <span>Start from the current palette, then tune the semantic colors.</span>
+                </div>
+                <Button
+                  variant={settings.themePreset === "custom" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => updateSettings({ themePreset: "custom" })}
+                >
+                  <Palette data-icon="inline-start" />
+                  {settings.themePreset === "custom" ? "Custom active" : "Use custom"}
+                </Button>
+              </div>
+              <div className="custom-theme-toolbar">
+                <label>
+                  Theme name
+                  <input type="text" value={settings.customThemeName} onChange={(event) => updateSettings({ customThemeName: event.target.value })} />
+                </label>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => updateSettings({
+                    customTheme: { ...activeTheme },
+                    customThemeName: settings.themePreset === "custom"
+                      ? settings.customThemeName
+                      : `${THEME_PRESETS.find((preset) => preset.id === settings.themePreset)?.name ?? "Voyager"} Custom`,
+                    themePreset: "custom",
+                  })}
+                >
+                  Clone current palette
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => updateSettings({ customTheme: { ...DEFAULT_THEME.palette }, customThemeName: "My Voyager Theme", themePreset: "custom" })}
+                >
+                  Reset custom
+                </Button>
+              </div>
+              <div className="custom-color-grid">
+                {CUSTOM_THEME_FIELDS.map(({ key, label }) => (
+                  <label key={key} className="custom-color-control">
+                    <span>{label}</span>
+                    <span className="custom-color-input-wrap">
+                      <input
+                        type="color"
+                        value={settings.customTheme[key]}
+                        onChange={(event) => updateSettings({
+                          customTheme: { ...settings.customTheme, [key]: event.target.value },
+                          themePreset: "custom",
+                        })}
+                      />
+                      <code>{settings.customTheme[key].toUpperCase()}</code>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </section>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={activityLogOpen} onOpenChange={setActivityLogOpen}>
+        <DialogContent className="activity-log-dialog">
+          <DialogHeader className="activity-log-header">
+            <div className="preferences-title-icon" aria-hidden="true"><History /></div>
+            <div>
+              <DialogTitle>Activity log</DialogTitle>
+              <DialogDescription>Voyager notifications recorded during this session, with local timestamps.</DialogDescription>
+            </div>
+          </DialogHeader>
+          <div className="activity-log-list" role="log" aria-live="polite">
+            {activityLog.length === 0 ? (
+              <div className="activity-log-empty">No activity has been recorded yet.</div>
+            ) : activityLog.map((entry) => (
+              <article key={entry.id} className={`activity-log-entry activity-log-entry-${entry.kind}`}>
+                <time dateTime={new Date(entry.timestamp).toISOString()}>
+                  {new Date(entry.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                </time>
+                <span className="activity-log-kind">{entry.kind}</span>
+                <p>{entry.message}</p>
+              </article>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {contextMenu ? (
-        <div className="tree-menu" style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }} onClick={(event) => event.stopPropagation()}>
+        <div ref={contextMenuRef} className="tree-menu" style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }} onClick={(event) => event.stopPropagation()}>
           {contextMenu.kind === "canvas" ? (
             <>
               <button type="button" onClick={() => addTreeNode("path", contextMenu.canvasX, contextMenu.canvasY)}>New path block</button>
@@ -2466,7 +3796,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
               <button type="button" onClick={() => addTreeNode("loop", contextMenu.canvasX, contextMenu.canvasY)}>New loop block</button>
               <button type="button" onClick={() => addTreeNode("interrupt", contextMenu.canvasX, contextMenu.canvasY)}>New interruptable block</button>
               <button type="button" onClick={() => addTreeNode("event", contextMenu.canvasX, contextMenu.canvasY)}>New event block</button>
-              <button type="button" onClick={() => { setTreeNodes((nodes) => nodes.map((node) => ({ ...node, selectedForRoutine: false, editing: false }))); setActivePathNodeId(null); setContextMenu(null); }}>Deselect all</button>
+              <button type="button" onClick={() => { setTreeNodes((nodes) => nodes.map((node) => ({ ...node, selectedForRoutine: false, editing: false }))); setActivePathNodeId(null); setSelectedTreeNodeId(null); setContextMenu(null); }}>Deselect all</button>
             </>
           ) : contextMenu.kind === "edge" ? (
             <>
@@ -2590,13 +3920,80 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
         </div>
       ) : null}
 
+      {playbackOpen ? (
+        <div
+          className="playback-modal"
+          style={{ left: `${playbackModalPosition.x}px`, top: `${playbackModalPosition.y}px` }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="modal-titlebar draggable" onPointerDown={beginPlaybackModalDrag}>
+            <div>
+              <strong>Path playback</strong>
+              <span>{activePathName ? `${activePathName} · looping preview` : "Select a path block to preview"}</span>
+            </div>
+            <button
+              type="button"
+              aria-label="Close path playback"
+              onClick={() => {
+                setPlaybackPlaying(false);
+                setPlaybackOpen(false);
+              }}
+            >
+              ×
+            </button>
+          </div>
+          <div className="playback-body">
+            <div className="playback-controls">
+              <button
+                type="button"
+                disabled={playbackPlan.totalDuration <= 0}
+                onClick={() => {
+                  if (playbackPlan.totalDuration <= 0) return;
+                  if (!playbackPlaying && playbackTime >= playbackPlan.totalDuration) setPlaybackTime(0);
+                  setPlaybackPlaying((playing) => !playing);
+                }}
+              >
+                {playbackPlaying ? "Pause" : "Play"}
+              </button>
+              <button
+                type="button"
+                disabled={playbackPlan.totalDuration <= 0 && playbackTime === 0}
+                onClick={() => {
+                  setPlaybackPlaying(false);
+                  setPlaybackTime(0);
+                }}
+              >
+                Reset
+              </button>
+              <span className="playback-time-current">{formatPlaybackTime(playbackTime)}</span>
+            </div>
+            <input
+              className="playback-timeline"
+              type="range"
+              min="0"
+              max={Math.max(0.01, playbackPlan.totalDuration)}
+              step="0.01"
+              value={clamp(playbackTime, 0, Math.max(0.01, playbackPlan.totalDuration))}
+              disabled={playbackPlan.totalDuration <= 0}
+              aria-label="Path playback timeline"
+              onChange={(event) => setPlaybackTime(clamp(Number(event.target.value), 0, playbackPlan.totalDuration))}
+            />
+            <div className="playback-summary">
+              <span>Estimated total: <strong>{formatPlaybackTime(playbackPlan.totalDuration)}</strong></span>
+              <span>Motion {formatPlaybackTime(playbackPlan.movementDuration)} · settle {formatPlaybackTime(playbackPlan.settlingDuration)}</span>
+            </div>
+            <p>Estimate uses trapezoidal motion limits, constraint zones, rotation targets, waypoint handoffs, controller gains, and end tolerances.</p>
+          </div>
+        </div>
+      ) : null}
+
       {settingsOpen ? (
         <div className="settings-overlay" onClick={() => setSettingsOpen(false)}>
           <div className="settings-modal" onClick={(event) => event.stopPropagation()}>
             <div className="modal-titlebar">
               <div>
                 <strong>Settings</strong>
-                <span>Field, robot, origin, storage, and save target.</span>
+                <span>Field, robot, path constraints, controllers, storage, and save target.</span>
               </div>
               <button type="button" aria-label="Close settings" onClick={() => setSettingsOpen(false)}>×</button>
             </div>
@@ -2649,8 +4046,9 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                 </label>
               </section>
 
-              <section className="settings-section">
-                <h3>Robot</h3>
+              <div className="settings-column">
+                <section className="settings-section">
+                  <h3>Robot</h3>
                 <label>
                   Robot length (m)
                   <input type="number" step="0.01" value={settings.robotLengthMeters} onChange={(event) => updateSettings({ robotLengthMeters: safePositive(Number(event.target.value), DEFAULT_SETTINGS.robotLengthMeters) })} />
@@ -2683,7 +4081,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                       window.addEventListener("pointerup", onPointerUp);
                     }}
                   >
-                    <span>robot</span>
+                    <SwerveModules settings={settings} velocity={{ vx: 0, vy: 0, omega: 0 }} headingDegrees={0} />
                     <i
                       className="robot-center-dot"
                       style={{
@@ -2692,6 +4090,52 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                       }}
                     />
                   </div>
+                </div>
+                <div className="swerve-geometry-controls">
+                  <label className="slider-setting">
+                    <span>Wheel length <output>{formatNumber(clamp(settings.swerveWheelLengthMeters, 0.04, settings.robotLengthMeters * 0.45), 2)} m</output></span>
+                    <input
+                      type="range"
+                      min="0.04"
+                      max={Math.max(0.04, settings.robotLengthMeters * 0.45)}
+                      step="0.01"
+                      value={clamp(settings.swerveWheelLengthMeters, 0.04, settings.robotLengthMeters * 0.45)}
+                      onChange={(event) => updateSettings({ swerveWheelLengthMeters: Number(event.target.value) })}
+                    />
+                  </label>
+                  <label className="slider-setting">
+                    <span>Wheel width <output>{formatNumber(clamp(settings.swerveWheelWidthMeters, 0.01, settings.robotWidthMeters * 0.2), 2)} m</output></span>
+                    <input
+                      type="range"
+                      min="0.01"
+                      max={Math.max(0.01, settings.robotWidthMeters * 0.2)}
+                      step="0.005"
+                      value={clamp(settings.swerveWheelWidthMeters, 0.01, settings.robotWidthMeters * 0.2)}
+                      onChange={(event) => updateSettings({ swerveWheelWidthMeters: Number(event.target.value) })}
+                    />
+                  </label>
+                  <label className="slider-setting">
+                    <span>Longitudinal offset <output>{formatNumber(clamp(settings.swerveModuleOffsetXMeters, 0, settings.robotLengthMeters / 2), 2)} m</output></span>
+                    <input
+                      type="range"
+                      min="0"
+                      max={Math.max(0.01, settings.robotLengthMeters / 2)}
+                      step="0.01"
+                      value={clamp(settings.swerveModuleOffsetXMeters, 0, settings.robotLengthMeters / 2)}
+                      onChange={(event) => updateSettings({ swerveModuleOffsetXMeters: Number(event.target.value) })}
+                    />
+                  </label>
+                  <label className="slider-setting">
+                    <span>Lateral offset <output>{formatNumber(clamp(settings.swerveModuleOffsetYMeters, 0, settings.robotWidthMeters / 2), 2)} m</output></span>
+                    <input
+                      type="range"
+                      min="0"
+                      max={Math.max(0.01, settings.robotWidthMeters / 2)}
+                      step="0.01"
+                      value={clamp(settings.swerveModuleOffsetYMeters, 0, settings.robotWidthMeters / 2)}
+                      onChange={(event) => updateSettings({ swerveModuleOffsetYMeters: Number(event.target.value) })}
+                    />
+                  </label>
                 </div>
                 <div className="two-column-inputs">
                   <label>
@@ -2703,7 +4147,71 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                     <input type="number" step="0.01" value={settings.centerOfRotationY} onChange={(event) => updateSettings({ centerOfRotationY: clamp(cleanNumber(Number(event.target.value), 0), 0, settings.robotWidthMeters) })} />
                   </label>
                 </div>
-              </section>
+                </section>
+
+                <section className="settings-section settings-section-divided">
+                  <h3>Path constraints</h3>
+                  <div className="two-column-inputs">
+                    <label>
+                      Max translational velocity (m/s)
+                      <input type="number" min="0.01" step="0.01" value={settings.maxTranslationalVelocity} onChange={(event) => updateSettings({ maxTranslationalVelocity: safePositive(Number(event.target.value), DEFAULT_SETTINGS.maxTranslationalVelocity) })} />
+                    </label>
+                    <label>
+                      Max translational acceleration (m/s²)
+                      <input type="number" min="0.01" step="0.01" value={settings.maxTranslationalAcceleration} onChange={(event) => updateSettings({ maxTranslationalAcceleration: safePositive(Number(event.target.value), DEFAULT_SETTINGS.maxTranslationalAcceleration) })} />
+                    </label>
+                    <label>
+                      Max rotational velocity (°/s)
+                      <input type="number" min="0.01" step="1" value={settings.maxRotationalVelocity} onChange={(event) => updateSettings({ maxRotationalVelocity: safePositive(Number(event.target.value), DEFAULT_SETTINGS.maxRotationalVelocity) })} />
+                    </label>
+                    <label>
+                      Max rotational acceleration (°/s²)
+                      <input type="number" min="0.01" step="1" value={settings.maxRotationalAcceleration} onChange={(event) => updateSettings({ maxRotationalAcceleration: safePositive(Number(event.target.value), DEFAULT_SETTINGS.maxRotationalAcceleration) })} />
+                    </label>
+                    <label>
+                      End translation tolerance (m)
+                      <input type="number" min="0.001" step="0.01" value={settings.endTranslationToleranceMeters} onChange={(event) => updateSettings({ endTranslationToleranceMeters: safePositive(Number(event.target.value), DEFAULT_SETTINGS.endTranslationToleranceMeters) })} />
+                    </label>
+                    <label>
+                      End rotation tolerance (°)
+                      <input type="number" min="0.01" step="0.1" value={settings.endRotationToleranceDegrees} onChange={(event) => updateSettings({ endRotationToleranceDegrees: safePositive(Number(event.target.value), DEFAULT_SETTINGS.endRotationToleranceDegrees) })} />
+                    </label>
+                  </div>
+                  <label>
+                    Default intermediate handoff radius (m)
+                    <input type="number" min="0.001" step="0.01" value={settings.defaultIntermediateHandOffRadiusMeters} onChange={(event) => updateSettings({ defaultIntermediateHandOffRadiusMeters: safePositive(Number(event.target.value), DEFAULT_SETTINGS.defaultIntermediateHandOffRadiusMeters) })} />
+                  </label>
+                  <p className="settings-help">New waypoints use this radius. Each waypoint’s Handoff field can override it.</p>
+
+                  <div className="controller-group">
+                    <strong>Translational controller PID</strong>
+                    <div className="three-column-inputs">
+                      <label>P<input type="number" min="0" step="0.01" value={settings.translationalControllerP} onChange={(event) => updateSettings({ translationalControllerP: Math.max(0, cleanNumber(Number(event.target.value), DEFAULT_SETTINGS.translationalControllerP)) })} /></label>
+                      <label>I<input type="number" min="0" step="0.01" value={settings.translationalControllerI} onChange={(event) => updateSettings({ translationalControllerI: Math.max(0, cleanNumber(Number(event.target.value), DEFAULT_SETTINGS.translationalControllerI)) })} /></label>
+                      <label>D<input type="number" min="0" step="0.01" value={settings.translationalControllerD} onChange={(event) => updateSettings({ translationalControllerD: Math.max(0, cleanNumber(Number(event.target.value), DEFAULT_SETTINGS.translationalControllerD)) })} /></label>
+                    </div>
+                  </div>
+
+                  <div className="controller-group">
+                    <strong>CTE controller PID</strong>
+                    <div className="three-column-inputs">
+                      <label>P<input type="number" min="0" step="0.01" value={settings.cteControllerP} onChange={(event) => updateSettings({ cteControllerP: Math.max(0, cleanNumber(Number(event.target.value), DEFAULT_SETTINGS.cteControllerP)) })} /></label>
+                      <label>I<input type="number" min="0" step="0.01" value={settings.cteControllerI} onChange={(event) => updateSettings({ cteControllerI: Math.max(0, cleanNumber(Number(event.target.value), DEFAULT_SETTINGS.cteControllerI)) })} /></label>
+                      <label>D<input type="number" min="0" step="0.01" value={settings.cteControllerD} onChange={(event) => updateSettings({ cteControllerD: Math.max(0, cleanNumber(Number(event.target.value), DEFAULT_SETTINGS.cteControllerD)) })} /></label>
+                    </div>
+                  </div>
+
+                  <div className="controller-group">
+                    <strong>Rotational controller PID</strong>
+                    <div className="three-column-inputs">
+                      <label>P<input type="number" min="0" step="0.01" value={settings.rotationalControllerP} onChange={(event) => updateSettings({ rotationalControllerP: Math.max(0, cleanNumber(Number(event.target.value), DEFAULT_SETTINGS.rotationalControllerP)) })} /></label>
+                      <label>I<input type="number" min="0" step="0.01" value={settings.rotationalControllerI} onChange={(event) => updateSettings({ rotationalControllerI: Math.max(0, cleanNumber(Number(event.target.value), DEFAULT_SETTINGS.rotationalControllerI)) })} /></label>
+                      <label>D<input type="number" min="0" step="0.01" value={settings.rotationalControllerD} onChange={(event) => updateSettings({ rotationalControllerD: Math.max(0, cleanNumber(Number(event.target.value), DEFAULT_SETTINGS.rotationalControllerD)) })} /></label>
+                    </div>
+                  </div>
+                  <p className="settings-help">Playback time is an estimate derived from the motion limits, zone overrides, controller response, handoff radii, and end tolerances.</p>
+                </section>
+              </div>
             </div>
           </div>
         </div>
@@ -2724,7 +4232,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
               <label>X (m)<input type="number" step="0.01" value={formatNumber(activeWaypointModal.x, 3)} onChange={(event) => updateWaypoint(activeWaypointModal.id, { x: clamp(cleanNumber(Number(event.target.value), 0), 0, settings.fieldLengthMeters) })} /></label>
               <label>Y (m)<input type="number" step="0.01" value={formatNumber(activeWaypointModal.y, 3)} onChange={(event) => updateWaypoint(activeWaypointModal.id, { y: clamp(cleanNumber(Number(event.target.value), 0), 0, settings.fieldWidthMeters) })} /></label>
               <label>Rotation (°)<input type="number" step="1" value={formatNumber(normalizeCompassDegrees(activeWaypointModal.angle), 2)} onChange={(event) => updateWaypoint(activeWaypointModal.id, { angle: normalizeCompassDegrees(cleanNumber(Number(event.target.value), 0)) })} /></label>
-              <label>Handoff (m)<input type="number" step="0.01" value={formatNumber(activeWaypointModal.handoff, 3)} onChange={(event) => updateWaypoint(activeWaypointModal.id, { handoff: safePositive(Number(event.target.value), 0.2) })} /></label>
+              <label>Handoff (m)<input type="number" step="0.01" value={formatNumber(activeWaypointModal.handoff, 3)} onChange={(event) => updateWaypoint(activeWaypointModal.id, { handoff: safePositive(Number(event.target.value), settings.defaultIntermediateHandOffRadiusMeters) })} /></label>
               <label className="checkbox-row"><input type="checkbox" checked={activeWaypointModal.profiled} onChange={(event) => updateWaypoint(activeWaypointModal.id, { profiled: event.target.checked })} />Profiled</label>
               <button className="danger full-button" type="button" onClick={() => deleteWaypoint(activeWaypointModal.id)}>Delete waypoint</button>
             </div>

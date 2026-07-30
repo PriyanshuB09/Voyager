@@ -8,110 +8,401 @@
   A visual desktop autonomous builder for FIRST Robotics Competition teams.
 </p>
 
-Voyager helps FRC teams design, organize, and deploy autonomous routines without reducing complex behavior to a single linear path. Build paths on an interactive field, combine them into branching routine trees, save the generated configuration into a robot project, and publish the selected routine over NT4.
+Voyager lets an FRC team build an autonomous routine as a branching tree, draw and tune each path on a field, preview the robot's motion, save the resulting JSON into a WPILib project, and publish the selected routine to the robot over NT4. This guide covers the complete Voyager 2.4.2 workflow.
 
-## Features
+## Contents
 
-- Visual autonomous routine tree with paths, conditions, loops, events, and interrupts
-- Interactive field editor for waypoints and robot rotation
-- Rotation targets, path events, and constraint zones
-- Configurable field image, field dimensions, and robot dimensions
-- Local project persistence between application sessions
-- Individual path saving and complete project export
-- Automatic cleanup of stale generated path files
-- NT4 connection using a team number, IP address, hostname, or localhost
-- Runtime autonomous selection published to `/Voyager/SelectedAuto`
-- Packaged Windows installer and portable application
+- [Install Voyager](#install-voyager)
+- [Install the robot-side library](#install-the-robot-side-library)
+- [Understand the workspace](#understand-the-workspace)
+- [First-time configuration](#first-time-configuration)
+- [Build an autonomous routine](#build-an-autonomous-routine)
+- [Edit a path](#edit-a-path)
+- [Preview a path](#preview-a-path)
+- [Use live robot telemetry](#use-live-robot-telemetry)
+- [Select and publish a routine](#select-and-publish-a-routine)
+- [Save and export](#save-and-export)
+- [Layouts and appearance](#layouts-and-appearance)
+- [Notifications and activity history](#notifications-and-activity-history)
+- [Keyboard shortcuts](#keyboard-shortcuts)
+- [Generated file format](#generated-file-format)
+- [Development](#development)
 
-## Downloads
+## Install Voyager
 
-Prebuilt packages are available from this repository's [GitHub Releases](https://github.com/PriyanshuB09/Voyager/releases):
+Download Voyager from the repository's [GitHub Releases](https://github.com/PriyanshuB09/Voyager/releases).
 
-- **Installer:** `Voyager Setup 1.0.1.exe`
-- **Portable:** `Voyager 1.0.1.exe`
+| Package | Best for |
+| --- | --- |
+| `Voyager Setup 2.4.2.exe` | Normal Windows installation |
+| `Voyager 2.4.2.exe` | Running Voyager without installing it |
 
-The installer is recommended for most users. The portable edition can be launched directly without installation.
+The Windows packages are not digitally code-signed, so SmartScreen may show an **Unknown publisher** warning. Only run packages obtained from the official repository.
 
-> [!IMPORTANT]
-> Current Windows builds are not digitally code-signed. Windows SmartScreen may show an **Unknown publisher** warning. Only run packages downloaded from this repository's official Releases page.
+## Install the robot-side library
 
-## Robot-Side Dependency
+Voyager is designed to work with [VoyagerLib](https://github.com/PriyanshuB09/VoyagerLib-Public), the companion WPILib vendor dependency that reads Voyager's generated autonomous configuration.
 
-Voyager is designed to be used with **[VoyagerLib](https://github.com/PriyanshuB09/VoyagerLib-Public)**, the companion WPILib vendor dependency that allows robot code to consume Voyager's generated autonomous configuration.
+In the robot project:
 
-Install the vendor dependency in your robot project using this URL:
+1. Open the WPILib Command Palette.
+2. Choose **WPILib: Manage Vendor Libraries**.
+3. Choose the option to install a new library from an online URL.
+4. Enter:
 
-```text
-https://priyanshub09.github.io/VoyagerLib-Public/VoyagerLib.json
-```
+   ```text
+   https://priyanshub09.github.io/VoyagerLib-Public/VoyagerLib.json
+   ```
 
-In a WPILib project, open the Command Palette and choose **WPILib: Manage Vendor Libraries**, then install a new library from the online URL above. The current public vendordep targets the 2026 FRC season and provides the Java artifact `com.team4188:voyager`.
+The current public vendordep targets the 2026 FRC season and provides the Java artifact `com.team4188:voyager`.
 
-## Powered by BLine
+### Powered by BLine
 
-VoyagerLib’s backend pathing and autonomous execution logic is powered by BLine, an open-source robotics library created by Edan Liahovetsky and Rebel Robotics (FRC 2638), which is a dependency of VoyagerLib.
+VoyagerLib's backend pathing and autonomous execution logic is powered by BLine, an open-source robotics library created by Edan Liahovetsky and Rebel Robotics (FRC 2638). BLine is a dependency of VoyagerLib and is licensed under the BSD 3-Clause License.
 
-BLine is licensed under the BSD 3-Clause License.
-
-Copyright (c) 2025, Edan Liahovetsky  
+Copyright (c) 2025, Edan Liahovetsky<br>
 Copyright (c) 2025, Rebel Robotics (FRC 2638)
 
-VoyagerLib is not endorsed by, sponsored by, or officially affiliated with Edan Liahovetsky or Rebel Robotics unless otherwise stated.
+VoyagerLib is not endorsed by, sponsored by, or officially affiliated with Edan Liahovetsky or Rebel Robotics unless otherwise stated. See [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md) for the complete license and attribution text.
 
-See [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md) for full license text and attribution details.
+## Understand the workspace
 
-## Getting Started
+Voyager has three primary work areas and a top navigation bar.
 
-1. Install or launch Voyager from the Releases page.
-2. Install [VoyagerLib](https://github.com/PriyanshuB09/VoyagerLib-Public) in the corresponding robot-code project.
-3. Open Voyager's settings and select the robot-code project folder.
-4. Configure the field, robot dimensions, and NT4 address.
-5. Add path blocks and control-flow blocks to the routine tree.
-6. Select a path block and edit its waypoints on the field.
-7. Use **Save All** to write the path files and autonomous configuration into the robot project.
-8. Select a routine and publish it to the robot over NT4 when needed.
+### Top navigation
 
-## Autonomous Model
+The top bar contains:
 
-Voyager routines are represented as trees rather than flat path lists. A routine can contain:
+- **Save**, with commands for the current path, all paths, and automatic saving.
+- **Settings**, for the field, robot, constraints, controllers, NT4, and robot-project destination.
+- **Preferences**, for built-in and custom themes.
+- **Layout**, with four ways to arrange the workspace.
+- A status message. Hover a visible message to reveal the activity-log button.
+
+Drag an unoccupied part of the top navigation bar to move the desktop window. Buttons and inputs remain interactive and do not initiate window dragging.
+
+### Auto maker field
+
+This is where the selected path is edited and simulated. Its toolbar contains:
+
+- **Undo** and **Redo**.
+- **Playback**, which toggles the path timeline window.
+- A path-element selector for **Waypoint**, **Rotation Target**, **Event Trigger**, or **Constraint Zone**.
+- **Add**, which adds the selected element type.
+
+The field keeps its configured aspect ratio. If a panel becomes narrower than its content, the field is preserved at full size and the panel becomes scrollable instead of cropping the field image.
+
+### Live robot position
+
+In the first three layouts, this field displays the live NT4 robot pose, connection state, persistent autonomous trail, and **Publish Routine** button. When disconnected, the robot is shown at `(0,0)`.
+
+In Auto focus layout, there is no small picture-in-picture live field. The live robot pose and its white trail are drawn directly on the Auto maker field. The connection indicator and **Publish Routine** button move into the Auto maker toolbar.
+
+### Path tree
+
+The path tree describes the order and branching structure of the routine. Drag nodes to arrange them and drag the canvas to pan. Double-click the canvas to reset its pan. A node selected for keyboard actions receives a selection outline; nodes belonging to the routine selected for publishing use the routine highlight.
+
+## First-time configuration
+
+Open **Settings** before building the first routine.
+
+### Field and project
+
+1. Use **Field image** to choose the field background.
+2. Choose **Select robot code project** and select the WPILib project root. Voyager shows the derived deploy destination below the button.
+3. Enter the field **width** and **length** in meters.
+4. Choose the corner representing field origin `(0,0)`: bottom-left, bottom-right, top-left, or top-right.
+
+Voyager uses the dimensions and origin to convert all field pixels to meters. Both field views and every robot frame use the same physical scale, so the configured robot dimensions remain accurate in meters.
+
+### NT4 connection
+
+The NT4 address accepts any of the following:
+
+- An FRC team number, such as `4188`.
+- `localhost` for local testing.
+- A direct address, such as `10.41.88.2`.
+- A hostname, such as `roboRIO-4188-FRC.local`.
+
+Enter the value and press Enter or select **Apply NT4 address**. **Localhost** fills the local address and **Clear** clears the draft. The current normalized provider appears beneath the controls.
+
+### Robot dimensions and swerve geometry
+
+Set **Robot length** and **Robot width** in meters. These values control the exact rendered frame size in the Auto maker field, Live robot position field, and Settings preview.
+
+Use the robot preview or numeric inputs to set the center of rotation:
+
+- Drag the dot in the preview to position it visually.
+- Enter **Center X** and **Center Y** for precise values.
+
+Use the four sliders to tune the swerve visualization:
+
+- **Wheel length**.
+- **Wheel width**.
+- **Longitudinal offset**, the front/back module distance from the robot reference.
+- **Lateral offset**, the left/right module distance from the robot reference.
+
+The preview, simulated robot, and live robot all display four swerve modules. Wheel steering uses inverse kinematics based on translational velocity, rotational velocity, heading, center of rotation, and configured module positions.
+
+### Global path constraints
+
+Configure the default motion limits:
+
+| Setting | Unit | Meaning |
+| --- | --- | --- |
+| Max translational velocity | m/s | Global linear speed limit |
+| Max translational acceleration | m/s² | Global linear acceleration limit |
+| Max rotational velocity | °/s | Global angular speed limit |
+| Max rotational acceleration | °/s² | Global angular acceleration limit |
+| End translation tolerance | m | Allowed final positional error |
+| End rotation tolerance | ° | Allowed final heading error |
+| Default intermediate handoff radius | m | Default distance for handing off between intermediate waypoints |
+
+The default handoff radius is assigned to new waypoints. Each waypoint can override it later.
+
+### Controllers
+
+Enter independent `P`, `I`, and `D` gains for:
+
+- The **translational controller**.
+- The **CTE controller**, which handles cross-track error.
+- The **rotational controller**.
+
+These values are included in Voyager's playback-time model along with motion limits, local constraint zones, handoff radii, end tolerances, and rotation targets. The displayed duration is an estimate for planning and visualization; real robot timing still depends on the drivetrain, control loop, battery, traction, and robot-side implementation.
+
+## Build an autonomous routine
+
+### Add blocks
+
+Use the **+** button in the path-tree toolbar, or right-click empty tree space, to create:
 
 | Block | Purpose |
 | --- | --- |
-| Path | Runs a named path generated by the field editor |
-| If | Chooses between true and false branches |
-| Loop | Repeats a nested sequence |
-| Event | Represents an event in the routine sequence |
-| Interrupt | Defines behavior that can interrupt another sequence |
+| Path | Runs a named path drawn in the Auto maker field |
+| If | Splits execution into true and false branches |
+| Loop | Runs a nested loop sequence, then continues afterward |
+| Interruptable | Defines an interruptible nested sequence, then continues afterward |
+| Event | Runs a named routine event between other blocks |
 
-Voyager prevents connections that would create cycles in the visual tree.
+Right-click a block to add an appropriately connected child. If blocks already exist, the relationship controls can remove a parent or child and reconnect blocks as parents or children. Voyager rejects connections that would create a cycle.
 
-## Generated Files
+### Work with nodes
 
-Voyager writes human-readable JSON into the selected robot-code project:
+- Click a node to select it for keyboard operations.
+- Drag a node to reposition it.
+- Double-click a node to rename it. Press Enter to accept or Escape to cancel.
+- Right-click a path and choose **Toggle editing** to open that path in the Auto maker field.
+- Right-click a node and use **Toggle selected** or **Toggle select for routine** to select its root routine and descendants for publishing.
+- Use the context menu's **Delete** command, or press Delete/Backspace, to delete the selected node and its child sequence.
 
-```text
-<path-name>.json     One file for each named path
-auto_config.json     The complete autonomous routine tree
-```
+Context menus automatically reposition to stay within the application window. If a menu is taller than the available space, it scrolls internally, so nodes near the bottom of the screen remain fully manageable.
 
-Generated path data can include:
+### Copy and duplicate tree content
 
-- Waypoints
-- Rotation targets
-- Events
-- Constraint zones
+With a node selected:
 
-These files should normally be committed with the robot project so the team's autonomous configuration is version-controlled alongside the code that runs it.
+- `Ctrl+C` copies the node and its entire child sequence.
+- `Ctrl+V` pastes the copied content as a new independent sequence. Path data and names are cloned rather than shared.
+- `Ctrl+D` duplicates only the selected node, without its children.
 
-## NT4 Integration
+### Recover a lost tree
 
-Voyager accepts an FRC team number, hostname, localhost, or direct IP address for its NT4 connection. The currently selected autonomous routine is published to:
+If no path nodes are visible, Voyager shows a warning at the upper-left of the tree. Select **Recover**, or use **Nearest path** in the tree toolbar, to center the closest path block. The resulting notification identifies the block that was centered.
+
+## Edit a path
+
+Select a path block for editing, then use the Auto maker toolbar to choose an element and press **Add**.
+
+### Waypoints
+
+A waypoint defines a robot position and heading.
+
+- Drag the waypoint frame to change its X/Y position.
+- Drag its rotation handle to change heading.
+- Double-click the last waypoint to append another waypoint after it.
+- Open the waypoint editor to enter exact **X**, **Y**, **Rotation**, and **Handoff** values, toggle **Profiled**, or delete the waypoint.
+
+The handoff circle around each waypoint shows its radius in meters. A newly connected path can inherit the final waypoint of the preceding path as its starting waypoint.
+
+### Rotation targets
+
+A rotation target sets a desired heading at a fractional position along the path.
+
+- Drag it along the path to change its position.
+- Drag its rotation handle to set its angle.
+- Open its editor to enter the rotation, adjust its position slider, toggle **Profiled**, or delete it.
+
+Rotation targets affect the playback robot's orientation, swerve state, and estimated duration.
+
+### Event triggers
+
+An event trigger associates a robot command name with a position along the path. Drag the marker along the path, then use its editor to set the **Command name**, fine-tune the position, or delete the event.
+
+### Constraint zones
+
+A constraint zone overrides motion limits for part of a path. Drag its start and end handles along the path, then edit:
+
+- Maximum translational velocity.
+- Maximum translational acceleration.
+- Maximum rotational velocity.
+- Maximum rotational acceleration.
+- Start and end path positions.
+
+Constraint zones are drawn over the affected path section and are included in both serialization and playback-time estimation.
+
+### Undo and redo
+
+Use the Auto maker toolbar or `Ctrl+Z` and `Ctrl+Y`. Voyager keeps up to 100 editor-history snapshots. Shortcuts are ignored while typing in an input, select, or editable text control.
+
+## Preview a path
+
+Press **Playback** beside Undo and Redo. The playback window is draggable by its title bar, remains open when clicking elsewhere, and closes only when **Playback** is toggled again or its close button is pressed.
+
+The playback controls provide:
+
+- **Play/Pause** for looping playback.
+- **Reset** to pause and return to the start.
+- A draggable video-style timeline for seeking to any time.
+- Current time and total time.
+- Separate motion and controller-settling estimates.
+
+The simulated robot moves only on the Auto maker field. It displays the configured robot frame and four swerve modules; their steering angles respond to the simulated translational and rotational velocity through inverse kinematics.
+
+The estimated total uses trapezoidal translational and rotational motion limits and accounts for local constraint zones, rotation targets, intermediate waypoint handoffs, controller gains, and final tolerances. Playback repeats continuously while playing.
+
+## Use live robot telemetry
+
+Voyager displays the robot's NT4 pose when connected. The live robot uses the same dimensions, center of rotation, wheel geometry, and field scale as the simulated robot. Its swerve modules respond to velocity inferred from consecutive live poses.
+
+When a routine is published, Voyager begins a solid white pose trail at the current robot pose. The trail does not fade and remains visible throughout the autonomous routine.
+
+- In default, horizontal, and mirrored layouts, the pose and trail appear in **Live robot position**.
+- In Auto focus layout, the live pose and trail are overlaid directly on the **Auto maker field**.
+- When disconnected, Voyager shows the live pose at `(0,0)` and labels the connection as offline.
+
+The playback robot and live robot are separate overlays: playback visualizes the planned path, while the live pose represents robot telemetry.
+
+## Select and publish a routine
+
+1. Right-click a block in the intended routine.
+2. Choose **Toggle selected** or **Toggle select for routine**. Voyager selects the root auto and its descendants and displays the routine highlight.
+3. Verify the connection indicator.
+4. Press **Publish Routine**.
+
+Voyager publishes the selected routine code to:
 
 ```text
 /Voyager/SelectedAuto
 ```
 
-The robot and development computer must be able to reach one another on the same network for live NT4 communication.
+Publishing while connected also resets the persistent live trail to the robot's current pose. The computer and robot must be reachable on the same network for live NT4 communication.
+
+## Save and export
+
+First choose the robot project in **Settings**. Voyager writes files to:
+
+```text
+<robot-project>/src/main/deploy/voyager/
+```
+
+Open **Save** in the top navigation and choose:
+
+- **Save this path** to write only the path currently open for editing.
+- **Save all paths** to write every path plus `auto_config.json`.
+- **Save automatically** to save all content shortly after a tree or path edit.
+
+Path names are converted to safe filenames. **Save all paths** also deletes stale generated path files that no longer correspond to a path-tree block. Voyager's editor state and preferences are additionally persisted locally between application sessions.
+
+Generated files should normally be committed with the robot project so autonomous definitions are version-controlled beside the code that executes them.
+
+## Layouts and appearance
+
+### Workspace layouts
+
+Use the four diagram buttons under **Layout**:
+
+1. **Default**: Auto maker and Live robot position are stacked on the left; the path tree fills the right.
+2. **Horizontal**: both field views are across the top; the path tree spans the bottom.
+3. **Mirrored**: the path tree fills the left; both field views are stacked on the right.
+4. **Auto focus**: the Auto maker fills the workspace, the live pose is overlaid on that same field, and the path tree becomes a floating window.
+
+Drag the dividers in the first three layouts to resize their sections. Field containers scroll when necessary, preserving the complete field image and its meter scale.
+
+In Auto focus layout, drag the path tree by its toolbar, resize it from its corner handle, or minimize and restore it. The floating tree does not replace the live pose: live telemetry is rendered directly on the Auto maker field.
+
+### Themes
+
+Open **Preferences** to choose one of ten presets:
+
+- Voyager Core
+- Neural Violet
+- Deep Space
+- Aurora
+- Cobalt Lab
+- Ember Drive
+- Rose Circuit
+- Matrix Ops
+- Graphite
+- High Contrast
+
+To create a personal theme, copy the current palette into **Custom theme**, give it a name, and edit its semantic colors. Theme changes apply immediately and save automatically. Voyager's ShadCN-style controls are implemented with Base UI rather than Radix.
+
+## Notifications and activity history
+
+Actions such as saving, publishing, undoing, reconnecting, editing the path tree, or centering a lost path produce a status message in the top navigation.
+
+Hover the message to reveal the activity-history button. The button stays visible while the pointer remains over either the message or button. Select it to open the **Activity log**, which records the session's notices with local timestamps and status types.
+
+## Keyboard shortcuts
+
+| Shortcut | Action |
+| --- | --- |
+| `Ctrl+Z` | Undo the last editor change |
+| `Ctrl+Y` | Redo the last undone change |
+| `Ctrl+C` | Copy the selected tree node and all descendants |
+| `Ctrl+V` | Paste the copied tree as a new independent sequence |
+| `Ctrl+D` | Duplicate only the selected tree node |
+| `Delete` or `Backspace` | Delete the selected node and its child sequence |
+| `Enter` | Accept a node rename or apply the focused NT4 address |
+| `Escape` | Cancel a node rename |
+
+Editor shortcuts do not intercept typing inside text fields, number fields, selects, or editable controls. Delete and Backspace are also disabled while Settings, Preferences, or Activity log dialogs are open.
+
+## Generated file format
+
+Each named path becomes a human-readable JSON file:
+
+```text
+<safe-path-name>.json
+```
+
+It contains the global motion constraints and:
+
+- Waypoints with X/Y, heading, handoff radius, and profiled state.
+- Rotation targets with heading and path position.
+- Event triggers with command name and path position.
+- Constraint-zone overrides with start/end positions.
+
+The complete tree is written as:
+
+```text
+auto_config.json
+```
+
+It contains each root autonomous routine and serializes its paths, events, true/false branches, loop bodies, interruptible sequences, and continuation chains.
+
+## Quick start checklist
+
+1. Install Voyager and VoyagerLib.
+2. Open **Settings** and select the WPILib project.
+3. Configure the field image, dimensions, and origin.
+4. Configure robot size, swerve geometry, and center of rotation.
+5. Configure constraints, tolerances, handoff radius, and translational/CTE/rotational PID gains.
+6. Apply the team number or NT4 address.
+7. Add and connect blocks in the path tree.
+8. Open each path for editing and place its waypoints, rotation targets, events, and constraint zones.
+9. Use **Playback** to inspect the simulated routine and estimated duration.
+10. Select a routine, choose **Save all paths**, connect to the robot, and press **Publish Routine**.
 
 ## Development
 
@@ -119,9 +410,9 @@ The robot and development computer must be able to reach one another on the same
 
 - Node.js 20 or newer
 - npm
-- Windows for producing the current Windows installer targets
+- Windows to produce the current installer targets
 
-### Run Locally
+### Run locally
 
 ```powershell
 git clone https://github.com/PriyanshuB09/Voyager.git
@@ -130,7 +421,7 @@ npm install
 npm run dev
 ```
 
-### Production Build
+### Validate and build
 
 Compile the Electron main process, preload bridge, and React renderer:
 
@@ -138,23 +429,23 @@ Compile the Electron main process, preload bridge, and React renderer:
 npm run build
 ```
 
-### Package a Windows Release
+### Package Windows distributions
 
 ```powershell
-npm run release
+npm run dist
 ```
 
-Release artifacts are written to `release/`:
+`npm run release` performs the same production build and Windows packaging operation. The output is written to `release/`:
 
 ```text
 release/
-|-- Voyager Setup 1.0.1.exe
-`-- Voyager 1.0.1.exe
+|-- Voyager Setup 2.4.2.exe
+`-- Voyager 2.4.2.exe
 ```
 
-Before publishing a new release, update the `version` field in `package.json`, build both packages, launch the packaged application for a smoke test, and attach the resulting executables to a GitHub Release.
+Before publishing a release, update the version in `package.json`, build both packages, smoke-test the packaged app, update the release notes, and attach the executables to a GitHub Release.
 
-## Project Structure
+### Project structure
 
 ```text
 Voyager/
@@ -163,14 +454,14 @@ Voyager/
 |-- src/                     React application and styles
 |-- electron.vite.config.ts  Electron/Vite build configuration
 |-- package.json             Scripts, dependencies, and packaging settings
-`-- RELEASE_NOTES_v1.0.1.md  Current release notes
+`-- RELEASE_NOTES_v2.4.2.md  Current release notes
 ```
 
-## Technology
+### Technology
 
 - Electron
-- React
-- TypeScript
+- React and TypeScript
+- ShadCN-style components backed by Base UI
 - Vite and electron-vite
 - electron-builder
 - NTCore client libraries
@@ -178,18 +469,11 @@ Voyager/
 
 ## Contributing
 
-Issues and pull requests are welcome. When contributing:
+Issues and pull requests are welcome. Keep changes focused, explain any effect on the autonomous JSON format, run `npm run build`, and test saving and NT4 behavior when those areas are affected. Use [GitHub Issues](https://github.com/PriyanshuB09/Voyager/issues) for bug reports and feature requests.
 
-1. Create a focused branch.
-2. Keep changes scoped and explain their effect on the autonomous file format.
-3. Run `npm run build` before opening a pull request.
-4. Test file saving and NT4-related behavior when those areas are affected.
+## Related project
 
-Please use [GitHub Issues](https://github.com/PriyanshuB09/Voyager/issues) for bug reports and feature requests.
-
-## Related Project
-
-- **[VoyagerLib-Public](https://github.com/PriyanshuB09/VoyagerLib-Public)** - WPILib vendor dependency and robot-side Voyager library
+- [VoyagerLib-Public](https://github.com/PriyanshuB09/VoyagerLib-Public) — WPILib vendor dependency and robot-side Voyager library
 
 ## License
 

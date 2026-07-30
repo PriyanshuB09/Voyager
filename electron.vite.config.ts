@@ -28,6 +28,11 @@ export default defineConfig({
   renderer: {
     root: ".",
     plugins: [react()],
+    resolve: {
+      alias: {
+        "@": resolve(__dirname, "src"),
+      },
+    },
     build: {
       rollupOptions: {
         input: resolve(__dirname, "index.html"),
