@@ -8,6 +8,13 @@ Voyager 2.4.2 expands the path-playback release with configurable workspaces, sw
 - Rendered the live robot pose and persistent white autonomous trail directly on the Auto maker field in focus mode.
 - Displays the live overlay at `(0,0)` while disconnected and follows the NT4 robot pose while connected.
 
+## 2.4.2 playback and window performance correction
+
+- Removed application-wide React state updates from the per-frame playback loop; robot pose, swerve modules, timestamp, and timeline now update locally at animation-frame speed.
+- Made playback seeking update the preview directly and commit editor state only after the seek finishes.
+- Changed playback, path-element, and focus-tree window dragging to GPU-accelerated transforms with one state commit when the pointer is released.
+- Disabled expensive backdrop filtering only while a floating window is being dragged or resized, then restored the themed effect afterward.
+
 ## 2.4.1 fix
 
 - Restored window dragging from the unoccupied top navigation area while keeping navigation buttons and layout controls interactive.

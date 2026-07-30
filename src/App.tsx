@@ -1325,6 +1325,27 @@ function SwerveModules({ settings, velocity, headingDegrees }: { settings: Setti
   );
 }
 
+function updateSwerveModulesElement(
+  robotElement: HTMLDivElement,
+  settings: Settings,
+  velocity: RobotVelocity,
+  headingDegrees: number,
+): void {
+  const modules = swerveModuleStates(settings, velocity, headingDegrees);
+  const maxSpeed = Math.max(0.001, ...modules.map((module) => module.speed));
+  const elements = robotElement.querySelectorAll<HTMLElement>(".swerve-module");
+  modules.forEach((module, index) => {
+    const element = elements.item(index);
+    if (!element) return;
+    element.style.left = `${module.xPercent}%`;
+    element.style.top = `${module.yPercent}%`;
+    element.style.width = `${module.lengthPercent}%`;
+    element.style.height = `${module.widthPercent}%`;
+    element.style.opacity = String(0.62 + (module.speed / maxSpeed) * 0.38);
+    element.style.transform = `translate(-50%, -50%) rotate(${compassDegreesToCssRotation(module.angleDegrees)}deg)`;
+  });
+}
+
 function formatPlaybackTime(seconds: number): string {
   const cleanSeconds = Math.max(0, seconds);
   const minutes = Math.floor(cleanSeconds / 60);
@@ -1623,11 +1644,18 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const autoSaveTimerRef = useRef<number | null>(null);
   const historyCommitTimerRef = useRef<number | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
+  const elementModalRef = useRef<HTMLDivElement>(null);
+  const playbackModalRef = useRef<HTMLDivElement>(null);
+  const playbackRobotRef = useRef<HTMLDivElement>(null);
+  const playbackTimelineRef = useRef<HTMLInputElement>(null);
+  const playbackTimeLabelRef = useRef<HTMLSpanElement>(null);
+  const focusTreeModalRef = useRef<HTMLElement>(null);
   const editorHistoryRef = useRef<EditorHistory | null>(null);
   const editorSnapshotRef = useRef<EditorSnapshot>({ treeNodes, pathDataByName, activePathNodeId });
   const applyingHistoryRef = useRef(false);
   const [, setHistoryRevision] = useState(0);
   const playbackAnimationFrameRef = useRef<number | null>(null);
+  const playbackTimeRef = useRef(0);
   const treeClipboardRef = useRef<TreeClipboardSnapshot | null>(null);
   const clipboardPasteCountRef = useRef(0);
   const previousLivePoseRef = useRef<{ pose: Pose2d; timestamp: number } | null>(null);
@@ -1664,14 +1692,38 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const activePathData = activePathName ? pathDataByName[activePathName] ?? createEmptyPathData() : createEmptyPathData();
   const activeMaxPosition = maxPathPosition(activePathData);
   const playbackPlan = useMemo(() => buildPlaybackPlan(activePathData, settings), [activePathData, settings]);
-  const playbackPose = useMemo(
-    () => poseAtPlaybackTime(activePathData, playbackPlan, playbackTime),
-    [activePathData, playbackPlan, playbackTime],
-  );
-  const playbackVelocity = useMemo(
-    () => playbackVelocityAtTime(activePathData, playbackPlan, playbackTime),
-    [activePathData, playbackPlan, playbackTime],
-  );
+  const playbackPose = poseAtPlaybackTime(activePathData, playbackPlan, playbackTimeRef.current);
+  const playbackVelocity = playbackVelocityAtTime(activePathData, playbackPlan, playbackTimeRef.current);
+  const applyPlaybackVisualTime = useCallback((requestedTime: number): void => {
+    const nextTime = clamp(requestedTime, 0, playbackPlan.totalDuration);
+    playbackTimeRef.current = nextTime;
+
+    if (playbackTimeLabelRef.current) {
+      playbackTimeLabelRef.current.textContent = formatPlaybackTime(nextTime);
+    }
+    if (playbackTimelineRef.current) {
+      playbackTimelineRef.current.value = String(nextTime);
+    }
+
+    const robotElement = playbackRobotRef.current;
+    if (!robotElement) return;
+    const pose = poseAtPlaybackTime(activePathData, playbackPlan, nextTime);
+    if (!pose) return;
+    const style = robotRenderStyle(settings, fieldOneSize, pose.x, pose.y, pose.angle);
+    robotElement.style.width = String(style.width);
+    robotElement.style.height = String(style.height);
+    robotElement.style.left = String(style.left);
+    robotElement.style.top = String(style.top);
+    robotElement.style.transform = String(style.transform);
+    robotElement.style.transformOrigin = String(style.transformOrigin);
+    robotElement.setAttribute("aria-label", `Path preview robot at ${formatPlaybackTime(nextTime)}`);
+    updateSwerveModulesElement(
+      robotElement,
+      settings,
+      playbackVelocityAtTime(activePathData, playbackPlan, nextTime),
+      pose.angle,
+    );
+  }, [activePathData, fieldOneSize, playbackPlan, settings]);
   const livePose: Pose2d = connected ? parsePose2d(poseStruct) : { x: 0, y: 0, rotation: 0 };
   const pxPerMeter = fieldOneSize.width > 0 ? fieldOneSize.width / settings.fieldLengthMeters : 0;
   const selectedRoutineCode = useMemo(() => selectedRoutineCodeFromNodes(treeNodes), [treeNodes]);
@@ -1759,11 +1811,14 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
 
   useEffect(() => {
     setPlaybackPlaying(false);
+    playbackTimeRef.current = 0;
     setPlaybackTime(0);
   }, [activePathName]);
 
   useEffect(() => {
-    setPlaybackTime((current) => clamp(current, 0, playbackPlan.totalDuration));
+    const nextTime = clamp(playbackTimeRef.current, 0, playbackPlan.totalDuration);
+    playbackTimeRef.current = nextTime;
+    setPlaybackTime(nextTime);
     if (playbackPlan.totalDuration <= 0) setPlaybackPlaying(false);
   }, [playbackPlan.totalDuration]);
 
@@ -1774,7 +1829,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     const tick = (timestamp: number): void => {
       const elapsedSeconds = Math.max(0, (timestamp - previousTimestamp) / 1000);
       previousTimestamp = timestamp;
-      setPlaybackTime((current) => (current + elapsedSeconds) % playbackPlan.totalDuration);
+      applyPlaybackVisualTime((playbackTimeRef.current + elapsedSeconds) % playbackPlan.totalDuration);
       playbackAnimationFrameRef.current = window.requestAnimationFrame(tick);
     };
 
@@ -1783,7 +1838,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       if (playbackAnimationFrameRef.current !== null) window.cancelAnimationFrame(playbackAnimationFrameRef.current);
       playbackAnimationFrameRef.current = null;
     };
-  }, [playbackOpen, playbackPlan.totalDuration, playbackPlaying]);
+  }, [applyPlaybackVisualTime, playbackOpen, playbackPlan.totalDuration, playbackPlaying]);
 
   useEffect(() => {
     if (!connected || !Number.isFinite(livePose.x) || !Number.isFinite(livePose.y) || !Number.isFinite(livePose.rotation)) {
@@ -2747,48 +2802,75 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const beginTreeModalDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>): void => {
     if (settings.layoutMode !== "focus" || (event.target as HTMLElement).closest("button, input, .tree-add-wrapper")) return;
     const workspace = workspaceRef.current;
-    if (!workspace) return;
+    const modalElement = focusTreeModalRef.current;
+    if (!workspace || !modalElement) return;
     event.preventDefault();
+    modalElement.classList.add("is-dragging");
     const bounds = workspace.getBoundingClientRect();
     const startPointer = { x: event.clientX, y: event.clientY };
     const startRect = treeModalRect;
+    let nextX = startRect.x;
+    let nextY = startRect.y;
 
     const onPointerMove = (moveEvent: PointerEvent): void => {
-      const nextX = clamp(startRect.x + moveEvent.clientX - startPointer.x, 0, Math.max(0, bounds.width - startRect.width));
-      const nextY = clamp(startRect.y + moveEvent.clientY - startPointer.y, 0, Math.max(0, bounds.height - 42));
-      setTreeModalRect((current) => ({ ...current, x: nextX, y: nextY }));
+      nextX = clamp(startRect.x + moveEvent.clientX - startPointer.x, 0, Math.max(0, bounds.width - startRect.width));
+      nextY = clamp(startRect.y + moveEvent.clientY - startPointer.y, 0, Math.max(0, bounds.height - 42));
+      modalElement.style.transform = `translate3d(${nextX - startRect.x}px, ${nextY - startRect.y}px, 0)`;
     };
     const onPointerUp = (): void => {
+      modalElement.style.left = `${nextX}px`;
+      modalElement.style.top = `${nextY}px`;
+      modalElement.style.transform = "";
+      modalElement.classList.remove("is-dragging");
+      setTreeModalRect((current) => ({ ...current, x: nextX, y: nextY }));
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
+      dragOperationRef.current = null;
     };
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
+    dragOperationRef.current = () => {
+      modalElement.style.transform = "";
+      modalElement.classList.remove("is-dragging");
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
   }, [settings.layoutMode, treeModalRect]);
 
   const beginTreeModalResize = useCallback((event: ReactPointerEvent<HTMLButtonElement>): void => {
     if (settings.layoutMode !== "focus" || treeModalMinimized) return;
     const workspace = workspaceRef.current;
-    if (!workspace) return;
+    const modalElement = focusTreeModalRef.current;
+    if (!workspace || !modalElement) return;
     event.preventDefault();
     event.stopPropagation();
+    modalElement.classList.add("is-resizing");
     const bounds = workspace.getBoundingClientRect();
     const startPointer = { x: event.clientX, y: event.clientY };
     const startRect = treeModalRect;
+    let nextWidth = startRect.width;
+    let nextHeight = startRect.height;
 
     const onPointerMove = (moveEvent: PointerEvent): void => {
-      setTreeModalRect((current) => ({
-        ...current,
-        width: clamp(startRect.width + moveEvent.clientX - startPointer.x, 320, Math.max(320, bounds.width - startRect.x)),
-        height: clamp(startRect.height + moveEvent.clientY - startPointer.y, 230, Math.max(230, bounds.height - startRect.y)),
-      }));
+      nextWidth = clamp(startRect.width + moveEvent.clientX - startPointer.x, 320, Math.max(320, bounds.width - startRect.x));
+      nextHeight = clamp(startRect.height + moveEvent.clientY - startPointer.y, 230, Math.max(230, bounds.height - startRect.y));
+      modalElement.style.width = `${nextWidth}px`;
+      modalElement.style.height = `${nextHeight}px`;
     };
     const onPointerUp = (): void => {
+      modalElement.classList.remove("is-resizing");
+      setTreeModalRect((current) => ({ ...current, width: nextWidth, height: nextHeight }));
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
+      dragOperationRef.current = null;
     };
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
+    dragOperationRef.current = () => {
+      modalElement.classList.remove("is-resizing");
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
   }, [settings.layoutMode, treeModalMinimized, treeModalRect]);
 
   const toggleTreeModalMinimized = useCallback((): void => {
@@ -2931,18 +3013,28 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const beginModalDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>): void => {
     if (!modal) return;
     const appRect = appRef.current?.getBoundingClientRect();
-    if (!appRect) return;
+    const modalElement = elementModalRef.current;
+    if (!appRect || !modalElement) return;
+    event.preventDefault();
+    modalElement.classList.add("is-dragging");
     draggingModalRef.current = { offsetX: event.clientX - appRect.left - modal.x, offsetY: event.clientY - appRect.top - modal.y };
+    let nextX = modal.x;
+    let nextY = modal.y;
 
     const onPointerMove = (moveEvent: PointerEvent): void => {
       const offset = draggingModalRef.current;
       if (!offset) return;
-      const nextX = moveEvent.clientX - appRect.left - offset.offsetX;
-      const nextY = moveEvent.clientY - appRect.top - offset.offsetY;
-      setModal((current) => (current ? { ...current, x: clamp(nextX, 4, appRect.width - 260), y: clamp(nextY, 44, appRect.height - 120) } : current));
+      nextX = clamp(moveEvent.clientX - appRect.left - offset.offsetX, 4, appRect.width - 260);
+      nextY = clamp(moveEvent.clientY - appRect.top - offset.offsetY, 44, appRect.height - 120);
+      modalElement.style.transform = `translate3d(${nextX - modal.x}px, ${nextY - modal.y}px, 0)`;
     };
 
     const onPointerUp = (): void => {
+      modalElement.style.left = `${nextX}px`;
+      modalElement.style.top = `${nextY}px`;
+      modalElement.style.transform = "";
+      modalElement.classList.remove("is-dragging");
+      setModal((current) => (current ? { ...current, x: nextX, y: nextY } : current));
       draggingModalRef.current = null;
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
@@ -2952,6 +3044,8 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
     dragOperationRef.current = () => {
+      modalElement.style.transform = "";
+      modalElement.classList.remove("is-dragging");
       draggingModalRef.current = null;
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
@@ -2959,28 +3053,39 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   }, [modal]);
 
   const togglePlaybackModal = useCallback((): void => {
-    if (playbackOpen) setPlaybackPlaying(false);
+    if (playbackOpen) {
+      setPlaybackPlaying(false);
+      setPlaybackTime(playbackTimeRef.current);
+    }
     setPlaybackOpen((open) => !open);
   }, [playbackOpen]);
 
   const beginPlaybackModalDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>): void => {
     if ((event.target as HTMLElement).closest("button, input")) return;
     const appRect = appRef.current?.getBoundingClientRect();
-    if (!appRect) return;
+    const modalElement = playbackModalRef.current;
+    if (!appRect || !modalElement) return;
     event.preventDefault();
     event.stopPropagation();
+    modalElement.classList.add("is-dragging");
     const offset = {
       x: event.clientX - appRect.left - playbackModalPosition.x,
       y: event.clientY - appRect.top - playbackModalPosition.y,
     };
+    let nextX = playbackModalPosition.x;
+    let nextY = playbackModalPosition.y;
 
     const onPointerMove = (moveEvent: PointerEvent): void => {
-      setPlaybackModalPosition({
-        x: clamp(moveEvent.clientX - appRect.left - offset.x, 4, Math.max(4, appRect.width - 564)),
-        y: clamp(moveEvent.clientY - appRect.top - offset.y, 44, Math.max(44, appRect.height - 190)),
-      });
+      nextX = clamp(moveEvent.clientX - appRect.left - offset.x, 4, Math.max(4, appRect.width - 564));
+      nextY = clamp(moveEvent.clientY - appRect.top - offset.y, 44, Math.max(44, appRect.height - 190));
+      modalElement.style.transform = `translate3d(${nextX - playbackModalPosition.x}px, ${nextY - playbackModalPosition.y}px, 0)`;
     };
     const onPointerUp = (): void => {
+      modalElement.style.left = `${nextX}px`;
+      modalElement.style.top = `${nextY}px`;
+      modalElement.style.transform = "";
+      modalElement.classList.remove("is-dragging");
+      setPlaybackModalPosition({ x: nextX, y: nextY });
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
       dragOperationRef.current = null;
@@ -2989,6 +3094,8 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
     dragOperationRef.current = () => {
+      modalElement.style.transform = "";
+      modalElement.classList.remove("is-dragging");
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
     };
@@ -3418,6 +3525,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
 
               {playbackOpen && playbackPose ? (
                 <div
+                  ref={playbackRobotRef}
                   className="robot-marker playback-robot-marker"
                   style={robotRenderStyle(settings, fieldOneSize, playbackPose.x, playbackPose.y, playbackPose.angle)}
                   aria-label={`Path preview robot at ${formatPlaybackTime(playbackTime)}`}
@@ -3522,6 +3630,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
         </div>
 
         <section
+          ref={focusTreeModalRef}
           className={`right-panel ${settings.layoutMode === "focus" ? "focus-tree-modal" : ""} ${treeModalMinimized ? "is-minimized" : ""}`}
           style={settings.layoutMode === "focus" ? {
             left: `${treeModalRect.x}px`,
@@ -3922,6 +4031,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
 
       {playbackOpen ? (
         <div
+          ref={playbackModalRef}
           className="playback-modal"
           style={{ left: `${playbackModalPosition.x}px`, top: `${playbackModalPosition.y}px` }}
           onClick={(event) => event.stopPropagation()}
@@ -3936,6 +4046,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
               aria-label="Close path playback"
               onClick={() => {
                 setPlaybackPlaying(false);
+                setPlaybackTime(playbackTimeRef.current);
                 setPlaybackOpen(false);
               }}
             >
@@ -3949,34 +4060,49 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                 disabled={playbackPlan.totalDuration <= 0}
                 onClick={() => {
                   if (playbackPlan.totalDuration <= 0) return;
-                  if (!playbackPlaying && playbackTime >= playbackPlan.totalDuration) setPlaybackTime(0);
-                  setPlaybackPlaying((playing) => !playing);
+                  if (playbackPlaying) {
+                    setPlaybackTime(playbackTimeRef.current);
+                    setPlaybackPlaying(false);
+                    return;
+                  }
+                  if (playbackTimeRef.current >= playbackPlan.totalDuration) {
+                    playbackTimeRef.current = 0;
+                    setPlaybackTime(0);
+                    applyPlaybackVisualTime(0);
+                  }
+                  setPlaybackPlaying(true);
                 }}
               >
                 {playbackPlaying ? "Pause" : "Play"}
               </button>
               <button
                 type="button"
-                disabled={playbackPlan.totalDuration <= 0 && playbackTime === 0}
+                disabled={playbackPlan.totalDuration <= 0 && playbackTimeRef.current === 0}
                 onClick={() => {
                   setPlaybackPlaying(false);
+                  playbackTimeRef.current = 0;
                   setPlaybackTime(0);
+                  applyPlaybackVisualTime(0);
                 }}
               >
                 Reset
               </button>
-              <span className="playback-time-current">{formatPlaybackTime(playbackTime)}</span>
+              <span ref={playbackTimeLabelRef} className="playback-time-current">{formatPlaybackTime(playbackTime)}</span>
             </div>
             <input
+              ref={playbackTimelineRef}
+              key={`${activePathName ?? "none"}-${playbackPlan.totalDuration}`}
               className="playback-timeline"
               type="range"
               min="0"
               max={Math.max(0.01, playbackPlan.totalDuration)}
               step="0.01"
-              value={clamp(playbackTime, 0, Math.max(0.01, playbackPlan.totalDuration))}
+              defaultValue={clamp(playbackTime, 0, Math.max(0.01, playbackPlan.totalDuration))}
               disabled={playbackPlan.totalDuration <= 0}
               aria-label="Path playback timeline"
-              onChange={(event) => setPlaybackTime(clamp(Number(event.target.value), 0, playbackPlan.totalDuration))}
+              onInput={(event) => applyPlaybackVisualTime(clamp(Number(event.currentTarget.value), 0, playbackPlan.totalDuration))}
+              onPointerUp={() => setPlaybackTime(playbackTimeRef.current)}
+              onKeyUp={() => setPlaybackTime(playbackTimeRef.current)}
             />
             <div className="playback-summary">
               <span>Estimated total: <strong>{formatPlaybackTime(playbackPlan.totalDuration)}</strong></span>
@@ -4218,7 +4344,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       ) : null}
 
       {modal ? (
-        <div className="element-modal" style={{ left: `${modal.x}px`, top: `${modal.y}px` }} onClick={(event) => event.stopPropagation()}>
+        <div ref={elementModalRef} className="element-modal" style={{ left: `${modal.x}px`, top: `${modal.y}px` }} onClick={(event) => event.stopPropagation()}>
           <div className="modal-titlebar draggable" onPointerDown={beginModalDrag}>
             <div>
               <strong>{modal.kind === "waypoint" ? "Waypoint" : modal.kind === "rotationTarget" ? "Rotation Target" : modal.kind === "eventTrigger" ? "Event Trigger" : "Constraint Zone"}</strong>

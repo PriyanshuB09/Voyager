@@ -478,10 +478,17 @@ label {
   background: rgba(94, 234, 212, 0.26);
   color: #ccfbf1;
   box-shadow: 0 0 0 3px rgba(94, 234, 212, 0.15), 0 8px 24px rgba(0, 0, 0, 0.38);
+  contain: layout paint style;
+  will-change: left, top, transform;
 }
 
 .playback-robot-marker::after {
   display: none;
+}
+
+.playback-robot-marker .swerve-module {
+  transition: none;
+  will-change: transform, opacity;
 }
 
 .swerve-modules {
@@ -838,6 +845,19 @@ label {
   border-radius: 14px;
   box-shadow: var(--shadow);
   z-index: 475;
+}
+
+.playback-modal.is-dragging,
+.element-modal.is-dragging,
+.focus-tree-modal.is-dragging,
+.focus-tree-modal.is-resizing {
+  backdrop-filter: none;
+  transition: none;
+  will-change: transform;
+}
+
+.focus-tree-modal.is-resizing {
+  will-change: width, height;
 }
 
 .playback-body {
