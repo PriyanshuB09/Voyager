@@ -315,6 +315,14 @@ label {
   gap: 6px;
 }
 
+.history-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-right: 6px;
+  border-right: 1px solid var(--border);
+}
+
 .field-actions select {
   width: 148px;
   height: 30px;
@@ -326,6 +334,20 @@ label {
   height: 30px;
   padding: 0 10px;
   font-size: 12px;
+}
+
+.field-actions button:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.field-actions button:disabled:hover {
+  border-color: var(--border);
+  background: var(--panel-2);
+}
+
+.field-actions button:disabled:active {
+  transform: none;
 }
 
 .field-surface {

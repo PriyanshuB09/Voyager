@@ -223,6 +223,18 @@ interface PersistedAppState {
   pan: PixelPoint;
 }
 
+interface EditorSnapshot {
+  treeNodes: PathTreeNode[];
+  pathDataByName: Record<string, SharedPathData>;
+  activePathNodeId: string | null;
+}
+
+interface EditorHistory {
+  past: EditorSnapshot[];
+  present: EditorSnapshot;
+  future: EditorSnapshot[];
+}
+
 interface SerializedWaypoint {
   x: number;
   y: number;
@@ -926,6 +938,20 @@ function useElementSize<T extends HTMLElement>(): [RefObject<T | null>, FieldSiz
   return [ref, size];
 }
 
+const EDITOR_HISTORY_LIMIT = 100;
+const EDITOR_HISTORY_COMMIT_DELAY_MS = 250;
+
+function editorSnapshotsMatch(left: EditorSnapshot, right: EditorSnapshot): boolean {
+  return left.treeNodes === right.treeNodes
+    && left.pathDataByName === right.pathDataByName
+    && left.activePathNodeId === right.activePathNodeId;
+}
+
+function isTextEditingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.isContentEditable || target.closest("input, textarea, select, [contenteditable='true']") !== null;
+}
+
 function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const appRef = useRef<HTMLDivElement>(null);
   const leftPanelRef = useRef<HTMLDivElement>(null);
@@ -952,6 +978,11 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const [nt4AddressDraft, setNt4AddressDraft] = useState(nt4Address);
   const persistTimerRef = useRef<number | null>(null);
   const autoSaveTimerRef = useRef<number | null>(null);
+  const historyCommitTimerRef = useRef<number | null>(null);
+  const editorHistoryRef = useRef<EditorHistory | null>(null);
+  const editorSnapshotRef = useRef<EditorSnapshot>({ treeNodes, pathDataByName, activePathNodeId });
+  const applyingHistoryRef = useRef(false);
+  const [, setHistoryRevision] = useState(0);
   const draggingModalRef = useRef<{ offsetX: number; offsetY: number } | null>(null);
   const dragOperationRef = useRef<(() => void) | null>(null);
   const [connected] = useEntry<boolean>("/AdvantageKit/DriverStation/DSAttached", false);
@@ -992,6 +1023,130 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       }));
     });
   }, [pathDataByName, treeNodes]);
+
+  const currentEditorSnapshot = useMemo<EditorSnapshot>(() => ({
+    treeNodes,
+    pathDataByName,
+    activePathNodeId,
+  }), [activePathNodeId, pathDataByName, treeNodes]);
+  editorSnapshotRef.current = currentEditorSnapshot;
+
+  useEffect(() => {
+    if (!hydrated) return;
+
+    const history = editorHistoryRef.current;
+    if (!history) {
+      editorHistoryRef.current = { past: [], present: currentEditorSnapshot, future: [] };
+      setHistoryRevision((revision) => revision + 1);
+      return;
+    }
+
+    if (applyingHistoryRef.current) {
+      applyingHistoryRef.current = false;
+      history.present = currentEditorSnapshot;
+      return;
+    }
+
+    if (editorSnapshotsMatch(history.present, currentEditorSnapshot)) return;
+
+    if (history.future.length > 0) {
+      history.future = [];
+      setHistoryRevision((revision) => revision + 1);
+    }
+
+    if (historyCommitTimerRef.current) window.clearTimeout(historyCommitTimerRef.current);
+    historyCommitTimerRef.current = window.setTimeout(() => {
+      const latest = editorSnapshotRef.current;
+      const latestHistory = editorHistoryRef.current;
+      historyCommitTimerRef.current = null;
+      if (!latestHistory || editorSnapshotsMatch(latestHistory.present, latest)) return;
+
+      latestHistory.past = [...latestHistory.past, latestHistory.present].slice(-EDITOR_HISTORY_LIMIT);
+      latestHistory.present = latest;
+      latestHistory.future = [];
+      setHistoryRevision((revision) => revision + 1);
+    }, EDITOR_HISTORY_COMMIT_DELAY_MS);
+  }, [currentEditorSnapshot, hydrated]);
+
+  const applyEditorSnapshot = useCallback((snapshot: EditorSnapshot, message: string): void => {
+    applyingHistoryRef.current = true;
+    setTreeNodes(snapshot.treeNodes);
+    setPathDataByName(snapshot.pathDataByName);
+    setActivePathNodeId(snapshot.activePathNodeId);
+    setModal(null);
+    setContextMenu(null);
+    setPendingConnection(null);
+    setSaveStatus({ kind: "idle", message });
+  }, []);
+
+  const undo = useCallback((): void => {
+    if (historyCommitTimerRef.current) {
+      window.clearTimeout(historyCommitTimerRef.current);
+      historyCommitTimerRef.current = null;
+    }
+
+    const history = editorHistoryRef.current;
+    if (!history) return;
+    const latest = editorSnapshotRef.current;
+
+    if (!editorSnapshotsMatch(history.present, latest)) {
+      history.past = [...history.past, history.present].slice(-EDITOR_HISTORY_LIMIT);
+      history.present = latest;
+      history.future = [];
+    }
+
+    const previous = history.past.at(-1);
+    if (!previous) return;
+
+    history.past = history.past.slice(0, -1);
+    history.future = [...history.future, history.present];
+    history.present = previous;
+    applyEditorSnapshot(previous, "Undid the last editor change.");
+    setHistoryRevision((revision) => revision + 1);
+  }, [applyEditorSnapshot]);
+
+  const redo = useCallback((): void => {
+    if (historyCommitTimerRef.current) {
+      window.clearTimeout(historyCommitTimerRef.current);
+      historyCommitTimerRef.current = null;
+    }
+
+    const history = editorHistoryRef.current;
+    if (!history || !editorSnapshotsMatch(history.present, editorSnapshotRef.current)) return;
+    const next = history.future.at(-1);
+    if (!next) return;
+
+    history.future = history.future.slice(0, -1);
+    history.past = [...history.past, history.present].slice(-EDITOR_HISTORY_LIMIT);
+    history.present = next;
+    applyEditorSnapshot(next, "Redid the last editor change.");
+    setHistoryRevision((revision) => revision + 1);
+  }, [applyEditorSnapshot]);
+
+  const canUndo = Boolean(
+    editorHistoryRef.current
+      && (editorHistoryRef.current.past.length > 0 || !editorSnapshotsMatch(editorHistoryRef.current.present, currentEditorSnapshot)),
+  );
+  const canRedo = Boolean(
+    editorHistoryRef.current
+      && editorSnapshotsMatch(editorHistoryRef.current.present, currentEditorSnapshot)
+      && editorHistoryRef.current.future.length > 0,
+  );
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (!event.ctrlKey || event.altKey || event.metaKey || isTextEditingTarget(event.target)) return;
+      const key = event.key.toLowerCase();
+      if (key !== "z" && key !== "y") return;
+
+      event.preventDefault();
+      if (key === "z") undo();
+      else redo();
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [redo, undo]);
 
   const setError = useCallback((message: string): void => {
     setSaveStatus({ kind: "error", message });
@@ -1062,7 +1217,8 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       }
       setPathDataByName((previous) => {
         const current = previous[activePathName] ?? createEmptyPathData();
-        return { ...previous, [activePathName]: updater(current) };
+        const updated = updater(current);
+        return updated === current ? previous : { ...previous, [activePathName]: updated };
       });
     },
     [activePathName, setError],
@@ -1928,6 +2084,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     return () => {
       if (persistTimerRef.current) window.clearTimeout(persistTimerRef.current);
       if (autoSaveTimerRef.current) window.clearTimeout(autoSaveTimerRef.current);
+      if (historyCommitTimerRef.current) window.clearTimeout(historyCommitTimerRef.current);
       if (dragOperationRef.current) dragOperationRef.current();
     };
   }, []);
@@ -1990,6 +2147,10 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                 <p>{activePathName ? `Editing ${activePathName}` : "Select a path block to edit"}</p>
               </div>
               <div className="field-actions">
+                <div className="history-actions" aria-label="Editor history controls">
+                  <button type="button" onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)">Undo</button>
+                  <button type="button" onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Y)">Redo</button>
+                </div>
                 <select value={addElementKind} onChange={(event) => setAddElementKind(event.target.value as AddElementKind)}>
                   <option value="waypoint">Waypoint</option>
                   <option value="rotationTarget">Rotation Target</option>
