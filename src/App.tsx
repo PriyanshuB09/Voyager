@@ -2391,16 +2391,16 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     });
   }, []);
 
-  const beginNodeConnectAsParent = useCallback((childId: string): void => {
-    const parentConnection = getParentConnection(treeNodes, childId);
-    beginOverrideConnection("connectParent", parentConnection?.parentId ?? null, childId, parentConnection?.slot ?? "next");
-  }, [beginOverrideConnection, treeNodes]);
-
-  const beginNodeConnectAsChild = useCallback((parentId: string): void => {
+  const beginNodeConnectAsParent = useCallback((parentId: string): void => {
     const parent = treeNodes.find((node) => node.id === parentId);
     if (!parent) return;
     const slot = defaultSlotForParent(parent, "next");
     beginOverrideConnection("connectChild", parentId, childIdForSlot(parent, slot), slot);
+  }, [beginOverrideConnection, treeNodes]);
+
+  const beginNodeConnectAsChild = useCallback((childId: string): void => {
+    const parentConnection = getParentConnection(treeNodes, childId);
+    beginOverrideConnection("connectParent", parentConnection?.parentId ?? null, childId, parentConnection?.slot ?? "next");
   }, [beginOverrideConnection, treeNodes]);
 
   const connectPendingToNode = useCallback((targetId: string): boolean => {
@@ -3246,7 +3246,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
         <div className="nav-left">
           <div className="app-icon" aria-hidden="true">V</div>
           <strong className="app-name">Voyager</strong>
-          <span className="version-chip">2.4.2</span>
+          <span className="version-chip">2.4.3</span>
           <div className="save-control" onClick={(event) => event.stopPropagation()}>
             <button className="nav-button" type="button" onClick={() => setSaveMenuOpen((open) => !open)}>
               Save <span aria-hidden="true">▾</span>
@@ -3966,8 +3966,8 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                 <div className="menu-section-label">Relationships</div>
                 <button type="button" disabled={!nodeParentConnection} onClick={() => removeNodeParent(node.id)}>Remove parent</button>
                 <button type="button" disabled={directChildren.length === 0} onClick={() => removeNodeChildren(node.id)}>Remove child</button>
-                <button type="button" onClick={() => beginNodeConnectAsParent(node.id)}>Connect as parent</button>
-                <button type="button" onClick={() => beginNodeConnectAsChild(node.id)}>Connect as child</button>
+                <button type="button" onClick={() => beginNodeConnectAsParent(node.id)}>Connect this block as parent</button>
+                <button type="button" onClick={() => beginNodeConnectAsChild(node.id)}>Connect this block as child</button>
                 {node.kind === "path" ? (
                   <>
                     <button type="button" onClick={() => addTreeNode("path", x, y, node.id, "next")}>Connect new path</button>

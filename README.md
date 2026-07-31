@@ -8,7 +8,7 @@
   A visual desktop autonomous builder for FIRST Robotics Competition teams.
 </p>
 
-Voyager lets an FRC team build an autonomous routine as a branching tree, draw and tune each path on a field, preview the robot's motion, save the resulting JSON into a WPILib project, and publish the selected routine to the robot over NT4. This guide covers the complete Voyager 2.4.2 workflow.
+Voyager lets an FRC team build an autonomous routine as a branching tree, draw and tune each path on a field, preview the robot's motion, save the resulting JSON into a WPILib project, and publish the selected routine to the robot over NT4. This guide covers the complete Voyager 2.4.3 workflow.
 
 ## Contents
 
@@ -34,8 +34,8 @@ Download Voyager from the repository's [GitHub Releases](https://github.com/Priy
 
 | Package | Best for |
 | --- | --- |
-| `Voyager Setup 2.4.2.exe` | Normal Windows installation |
-| `Voyager 2.4.2.exe` | Running Voyager without installing it |
+| `Voyager Setup 2.4.3.exe` | Normal Windows installation |
+| `Voyager 2.4.3.exe` | Running Voyager without installing it |
 
 The Windows packages are not digitally code-signed, so SmartScreen may show an **Unknown publisher** warning. Only run packages obtained from the official repository.
 
@@ -80,6 +80,8 @@ The top bar contains:
 - A status message. Hover a visible message to reveal the activity-log button.
 
 Drag an unoccupied part of the top navigation bar to move the desktop window. Buttons and inputs remain interactive and do not initiate window dragging.
+
+Application chrome, labels, field elements, and tree content cannot be accidentally text-highlighted while operating Voyager. Text selection remains available inside text and number inputs.
 
 ### Auto maker field
 
@@ -184,7 +186,7 @@ Use the **+** button in the path-tree toolbar, or right-click empty tree space, 
 | Interruptable | Defines an interruptible nested sequence, then continues afterward |
 | Event | Runs a named routine event between other blocks |
 
-Right-click a block to add an appropriately connected child. If blocks already exist, the relationship controls can remove a parent or child and reconnect blocks as parents or children. Voyager rejects connections that would create a cycle.
+Right-click a block to add an appropriately connected child. If blocks already exist, the relationship controls can remove a parent or child and reconnect blocks. **Connect this block as parent** keeps the selected block as the parent and asks you to click its new child; **Connect this block as child** keeps it as the child and asks you to click its new parent. Voyager rejects connections that would create a cycle.
 
 ### Work with nodes
 
@@ -218,7 +220,7 @@ Select a path block for editing, then use the Auto maker toolbar to choose an el
 A waypoint defines a robot position and heading.
 
 - Drag the waypoint frame to change its X/Y position.
-- Drag its rotation handle to change heading.
+- Drag the outward rotation handle to change heading. Its connector and increased distance from the frame center provide a larger control radius.
 - Double-click the last waypoint to append another waypoint after it.
 - Open the waypoint editor to enter exact **X**, **Y**, **Rotation**, and **Handoff** values, toggle **Profiled**, or delete the waypoint.
 
@@ -229,7 +231,7 @@ The handoff circle around each waypoint shows its radius in meters. A newly conn
 A rotation target sets a desired heading at a fractional position along the path.
 
 - Drag it along the path to change its position.
-- Drag its rotation handle to set its angle.
+- Drag its outward rotation handle to set its angle.
 - Open its editor to enter the rotation, adjust its position slider, toggle **Profiled**, or delete it.
 
 Rotation targets affect the playback robot's orientation, swerve state, and estimated duration.
@@ -332,7 +334,7 @@ In Auto focus layout, drag the path tree by its toolbar, resize it from its corn
 
 ### Themes
 
-Open **Preferences** to choose one of ten presets:
+Open **Preferences** to choose one of ten presets. The modal keeps its header visible and scrolls its appearance content within the available window height:
 
 - Voyager Core
 - Neural Violet
@@ -439,8 +441,8 @@ npm run dist
 
 ```text
 release/
-|-- Voyager Setup 2.4.2.exe
-`-- Voyager 2.4.2.exe
+|-- Voyager Setup 2.4.3.exe
+`-- Voyager 2.4.3.exe
 ```
 
 Before publishing a release, update the version in `package.json`, build both packages, smoke-test the packaged app, update the release notes, and attach the executables to a GitHub Release.
@@ -454,7 +456,7 @@ Voyager/
 |-- src/                     React application and styles
 |-- electron.vite.config.ts  Electron/Vite build configuration
 |-- package.json             Scripts, dependencies, and packaging settings
-`-- RELEASE_NOTES_v2.4.2.md  Current release notes
+`-- RELEASE_NOTES_v2.4.3.md  Current release notes
 ```
 
 ### Technology
