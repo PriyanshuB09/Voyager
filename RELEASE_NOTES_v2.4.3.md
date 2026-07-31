@@ -5,7 +5,7 @@
 - Text can now be highlighted only inside text and number inputs.
 - Fixed **Connect this block as parent** and **Connect this block as child** behavior.
 - The Preferences modal now scrolls correctly.
-- Waypoint and rotation-target rotation knobs are farther from their frames and easier to use.
+- Waypoint and rotation-target knobs rest on their frames, lift outward while held, and return when released.
 - Handoff-radius labels have improved contrast over field images.
 
 ## Downloads

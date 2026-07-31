@@ -220,7 +220,7 @@ Select a path block for editing, then use the Auto maker toolbar to choose an el
 A waypoint defines a robot position and heading.
 
 - Drag the waypoint frame to change its X/Y position.
-- Drag the outward rotation handle to change heading. Its connector and increased distance from the frame center provide a larger control radius.
+- Hold the rotation handle to lift it away from the frame, then drag it around the waypoint to change heading with a larger control radius. It returns to the frame perimeter when released.
 - Double-click the last waypoint to append another waypoint after it.
 - Open the waypoint editor to enter exact **X**, **Y**, **Rotation**, and **Handoff** values, toggle **Profiled**, or delete the waypoint.
 
@@ -231,7 +231,7 @@ The handoff circle around each waypoint shows its radius in meters. A newly conn
 A rotation target sets a desired heading at a fractional position along the path.
 
 - Drag it along the path to change its position.
-- Drag its outward rotation handle to set its angle.
+- Hold its rotation handle to lift it away from the frame, then drag it to set the angle. It returns to the frame perimeter when released.
 - Open its editor to enter the rotation, adjust its position slider, toggle **Profiled**, or delete it.
 
 Rotation targets affect the playback robot's orientation, swerve state, and estimated duration.

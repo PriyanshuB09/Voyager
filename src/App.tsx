@@ -1639,6 +1639,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const [livePoseTrail, setLivePoseTrail] = useState<Pose2d[]>([]);
   const [renamingNodeId, setRenamingNodeId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const [activeRotationHandleId, setActiveRotationHandleId] = useState<string | null>(null);
   const [nt4AddressDraft, setNt4AddressDraft] = useState(nt4Address);
   const persistTimerRef = useRef<number | null>(null);
   const autoSaveTimerRef = useRef<number | null>(null);
@@ -2661,6 +2662,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       if (fieldOneSize.width <= 0 || fieldOneSize.height <= 0) return;
       const fieldRect = fieldOneRef.current?.getBoundingClientRect();
       if (!fieldRect) return;
+      setActiveRotationHandleId(`waypoint-${waypoint.id}`);
 
       const onPointerMove = (moveEvent: PointerEvent): void => {
         const center = pointToPixels(settings, fieldOneSize, waypoint);
@@ -2674,6 +2676,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       };
 
       const onPointerUp = (): void => {
+        setActiveRotationHandleId(null);
         window.removeEventListener("pointermove", onPointerMove);
         window.removeEventListener("pointerup", onPointerUp);
         dragOperationRef.current = null;
@@ -2682,6 +2685,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       window.addEventListener("pointermove", onPointerMove);
       window.addEventListener("pointerup", onPointerUp);
       dragOperationRef.current = () => {
+        setActiveRotationHandleId(null);
         window.removeEventListener("pointermove", onPointerMove);
         window.removeEventListener("pointerup", onPointerUp);
       };
@@ -2696,6 +2700,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       const fieldRect = fieldOneRef.current?.getBoundingClientRect();
       const point = pointAtPathPosition(activePathData.waypoints, target.position);
       if (!fieldRect || !point) return;
+      setActiveRotationHandleId(`target-${target.id}`);
 
       const onPointerMove = (moveEvent: PointerEvent): void => {
         const center = pointToPixels(settings, fieldOneSize, point);
@@ -2709,6 +2714,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       };
 
       const onPointerUp = (): void => {
+        setActiveRotationHandleId(null);
         window.removeEventListener("pointermove", onPointerMove);
         window.removeEventListener("pointerup", onPointerUp);
         dragOperationRef.current = null;
@@ -2717,6 +2723,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       window.addEventListener("pointermove", onPointerMove);
       window.addEventListener("pointerup", onPointerUp);
       dragOperationRef.current = () => {
+        setActiveRotationHandleId(null);
         window.removeEventListener("pointermove", onPointerMove);
         window.removeEventListener("pointerup", onPointerUp);
       };
@@ -3416,7 +3423,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                   }}
                 >
                   <span>{index + 1}</span>
-                  <button className="rotation-handle" type="button" aria-label="Rotate waypoint" onPointerDown={(event) => beginWaypointRotate(event, waypoint)} />
+                  <button className={`rotation-handle ${activeRotationHandleId === `waypoint-${waypoint.id}` ? "is-elevated" : ""}`} type="button" aria-label="Rotate waypoint" onPointerDown={(event) => beginWaypointRotate(event, waypoint)} />
                 </div>
               ))}
 
@@ -3436,7 +3443,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                     }}
                   >
                     <span>RT</span>
-                    <button className="rotation-handle" type="button" aria-label="Rotate rotation target" onPointerDown={(event) => beginRotationTargetRotate(event, target)} />
+                    <button className={`rotation-handle ${activeRotationHandleId === `target-${target.id}` ? "is-elevated" : ""}`} type="button" aria-label="Rotate rotation target" onPointerDown={(event) => beginRotationTargetRotate(event, target)} />
                   </div>
                 );
               })}
