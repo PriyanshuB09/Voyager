@@ -8,7 +8,7 @@
   A visual desktop autonomous builder for FIRST Robotics Competition teams.
 </p>
 
-Voyager lets an FRC team build an autonomous routine as a branching tree, draw and tune each path on a field, plan collision-free routes around measured obstacles, preview the robot's motion, save the complete workspace into a WPILib project, and publish the selected routine to the robot over NT4. This guide covers the Voyager 3.1.1-alpha workflow.
+Voyager lets an FRC team build an autonomous routine as a branching tree, draw and tune each path on a field, plan collision-free routes around measured obstacles, preview the robot's motion, save the complete workspace into a WPILib project, and publish the selected routine to the robot over NT4. This guide covers the Voyager 3.1.3-alpha workflow.
 
 ## Contents
 
@@ -36,8 +36,8 @@ Download Voyager from the repository's [GitHub Releases](https://github.com/Priy
 
 | Package | Best for |
 | --- | --- |
-| `Voyager Setup 3.1.1-alpha.exe` | Normal Windows installation |
-| `Voyager 3.1.1-alpha.exe` | Running Voyager without installing it |
+| `Voyager Setup 3.1.3-alpha.exe` | Normal Windows installation |
+| `Voyager 3.1.3-alpha.exe` | Running Voyager without installing it |
 
 The Windows packages are not digitally code-signed, so SmartScreen may show an **Unknown publisher** warning. Only run packages obtained from the official repository.
 
@@ -92,7 +92,7 @@ Application chrome, labels, field elements, and tree content cannot be accidenta
 This is where the selected path is edited and simulated. Its toolbar contains:
 
 - **Undo** and **Redo**.
-- **More Tools**, a dropdown containing **Mirror X**, **Mirror Y**, and obstacle-overlay visibility.
+- **More Tools**, a dropdown containing **Mirror X**, **Mirror Y**, obstacle-overlay visibility, and waypoint handoff-radius visibility.
 - **Playback**, which toggles the path timeline window.
 - **Plan path**, which collects a start and destination click and creates a collision-aware route.
 - A path-element selector for **Waypoint**, **Rotation Target**, **Event Trigger**, **Event Zone**, or **Constraint Zone**.
@@ -180,8 +180,8 @@ These values are included in Voyager's playback-time model along with motion lim
 
 The **Obstacle-aware path planner** section has two five-position sliders:
 
-- **Relative waypoint amount** controls A* search-grid detail, from Very low through Very high. Straight runs are collapsed to their endpoints rather than being filled with spacing-only waypoints.
-- **Relative path sharpness** controls turn penalties and safe corner rounding. Lower values produce gentler paths; higher values permit tighter direction changes.
+- **Relative waypoint amount** controls A* search-grid spacing across five levels. The low and high endpoints map to their intended planner extremes, while straight runs are still collapsed to their endpoints instead of receiving spacing-only waypoints.
+- **Relative path sharpness** controls turn penalties and safe corner rounding. Its low and high endpoints use the same corrected direction as the waypoint control, so the displayed level matches the generated-route behavior.
 
 ## Build an autonomous routine
 
@@ -235,7 +235,7 @@ A waypoint defines a robot position and heading.
 - Double-click the last waypoint to append another waypoint after it.
 - Open the waypoint editor to enter exact **X**, **Y**, **Rotation**, and **Handoff** values, toggle **Profiled**, or delete the waypoint.
 
-The handoff circle around each waypoint shows its radius in meters. A newly connected path can inherit the final waypoint of the preceding path as its starting waypoint.
+The handoff circle around each waypoint shows its radius in meters. Choose **Hide handoff radii** from **More Tools** when those labels obstruct the field; choose **Show handoff radii** to restore them. Visibility does not change the saved radius values. A newly connected path can inherit the final waypoint of the preceding path as its starting waypoint.
 
 ### Rotation targets
 
@@ -510,8 +510,8 @@ npm run dist
 
 ```text
 release/
-|-- Voyager Setup 3.1.1-alpha.exe
-`-- Voyager 3.1.1-alpha.exe
+|-- Voyager Setup 3.1.3-alpha.exe
+`-- Voyager 3.1.3-alpha.exe
 ```
 
 Before publishing a release, update the version in `package.json`, build both packages, smoke-test the packaged app, update the release notes, and attach the executables to a GitHub Release.
@@ -525,7 +525,7 @@ Voyager/
 |-- src/                     React application and styles
 |-- electron.vite.config.ts  Electron/Vite build configuration
 |-- package.json             Scripts, dependencies, and packaging settings
-`-- RELEASE_NOTES_v3.1.1-alpha.md  Current release notes
+`-- RELEASE_NOTES_v3.1.3-alpha.md  Current release notes
 ```
 
 ### Technology

@@ -165,6 +165,7 @@ interface Settings {
   plannerSharpness: PlannerLevel;
   designPreset: DesignPresetId;
   showObstacleZones: boolean;
+  showHandoffRadii: boolean;
 }
 
 interface FieldObstacle {
@@ -495,7 +496,7 @@ const DB_NAME = "voyager-autonomous-builder";
 const DB_VERSION = 1;
 const DB_STORE = "kv";
 const APP_STATE_KEY = "app-state";
-const VOYAGER_VERSION = "3.1.1-alpha";
+const VOYAGER_VERSION = "3.1.3-alpha";
 const PROJECT_METADATA_FILE = "metadata.json";
 const NODE_WIDTH = 160;
 const NODE_HEIGHT = 62;
@@ -777,6 +778,7 @@ const DEFAULT_SETTINGS: Settings = {
   plannerSharpness: 2,
   designPreset: DEFAULT_DESIGN.id,
   showObstacleZones: true,
+  showHandoffRadii: true,
 };
 
 function createId(prefix: string): string {
@@ -919,6 +921,43 @@ async function idbSet<T>(key: string, value: T): Promise<void> {
 
 function createEmptyPathData(): SharedPathData {
   return { waypoints: [], rotationTargets: [], events: [], eventZones: [], constraintZones: [] };
+}
+
+const EMPTY_PATH_DATA = createEmptyPathData();
+
+interface PointerFrameScheduler {
+  schedule: (clientX: number, clientY: number) => void;
+  flush: (clientX?: number, clientY?: number) => void;
+  cancel: () => void;
+}
+
+function createPointerFrameScheduler(callback: (clientX: number, clientY: number) => void): PointerFrameScheduler {
+  let animationFrame: number | null = null;
+  let latestPoint: PixelPoint | null = null;
+
+  const run = (): void => {
+    animationFrame = null;
+    const point = latestPoint;
+    latestPoint = null;
+    if (point) callback(point.x, point.y);
+  };
+
+  return {
+    schedule(clientX, clientY) {
+      latestPoint = { x: clientX, y: clientY };
+      if (animationFrame === null) animationFrame = globalThis.requestAnimationFrame(run);
+    },
+    flush(clientX, clientY) {
+      if (clientX !== undefined && clientY !== undefined) latestPoint = { x: clientX, y: clientY };
+      if (animationFrame !== null) globalThis.cancelAnimationFrame(animationFrame);
+      run();
+    },
+    cancel() {
+      if (animationFrame !== null) globalThis.cancelAnimationFrame(animationFrame);
+      animationFrame = null;
+      latestPoint = null;
+    },
+  };
 }
 
 function createDefaultWaypoint(settings: Settings): Waypoint {
@@ -1279,6 +1318,9 @@ function clampMeterPoint(settings: Settings, point: MeterPoint): MeterPoint {
 }
 
 const PLANNER_LEVEL_LABELS = ["Very low", "Low", "Default", "High", "Very high"] as const;
+const PLANNER_GRID_CELL_METERS_BY_LEVEL = [0.16, 0.21, 0.27, 0.34, 0.42] as const;
+const PLANNER_CORNER_ROUNDING_BY_LEVEL = [0.06, 0.13, 0.21, 0.28, 0.34] as const;
+const PLANNER_TURN_PENALTY_BY_LEVEL = [0.04, 0.2, 0.52, 0.9, 1.4] as const;
 
 function normalizePlannerLevel(value: unknown): PlannerLevel {
   return clamp(Math.round(cleanNumber(Number(value), 2)), 0, 4) as PlannerLevel;
@@ -1392,7 +1434,7 @@ function simplifyPlannerPath(points: MeterPoint[], obstacles: FieldObstacle[], s
 
 function roundPlannerCorners(points: MeterPoint[], obstacles: FieldObstacle[], settings: Settings): MeterPoint[] {
   if (points.length <= 2) return points;
-  const amount = [0.34, 0.28, 0.21, 0.13, 0.06][settings.plannerSharpness];
+  const amount = PLANNER_CORNER_ROUNDING_BY_LEVEL[settings.plannerSharpness];
   const rounded: MeterPoint[] = [points[0]];
   for (let index = 1; index < points.length - 1; index += 1) {
     const previous = points[index - 1];
@@ -1437,7 +1479,7 @@ function planCollisionFreePath(start: MeterPoint, end: MeterPoint, obstacles: Fi
   if (!plannerPointIsClear(start, obstacles, settings) || !plannerPointIsClear(end, obstacles, settings)) return null;
   if (plannerSegmentIsClear(start, end, obstacles, settings)) return [start, end];
 
-  const requestedCell = [0.42, 0.34, 0.27, 0.21, 0.16][settings.plannerWaypointDensity];
+  const requestedCell = PLANNER_GRID_CELL_METERS_BY_LEVEL[settings.plannerWaypointDensity];
   const columns = Math.max(3, Math.ceil(settings.fieldLengthMeters / requestedCell) + 1);
   const rows = Math.max(3, Math.ceil(settings.fieldWidthMeters / requestedCell) + 1);
   const cellX = settings.fieldLengthMeters / (columns - 1);
@@ -1491,7 +1533,7 @@ function planCollisionFreePath(start: MeterPoint, end: MeterPoint, obstacles: Fi
     { x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 },
     { x: 1, y: 1 }, { x: 1, y: -1 }, { x: -1, y: 1 }, { x: -1, y: -1 },
   ];
-  const turnPenalty = [1.4, 0.9, 0.52, 0.2, 0.04][settings.plannerSharpness];
+  const turnPenalty = PLANNER_TURN_PENALTY_BY_LEVEL[settings.plannerSharpness];
 
   while (open.size > 0) {
     const currentIndex = open.pop();
@@ -2098,6 +2140,9 @@ function normalizePersistedState(value: PersistedAppState | null): PersistedAppS
       showObstacleZones: typeof value.settings?.showObstacleZones === "boolean"
         ? value.settings.showObstacleZones
         : DEFAULT_SETTINGS.showObstacleZones,
+      showHandoffRadii: typeof value.settings?.showHandoffRadii === "boolean"
+        ? value.settings.showHandoffRadii
+        : DEFAULT_SETTINGS.showHandoffRadii,
     };
   return {
     settings: normalizedSettings,
@@ -2134,13 +2179,22 @@ function useElementSize<T extends HTMLElement>(observeKey: unknown = true): [Ref
     let animationFrame: number | null = null;
     let observer: ResizeObserver | null = null;
     let update: (() => void) | null = null;
+    let resizeFrame: number | null = null;
     const attach = (): void => {
       const element = ref.current;
       if (!element) {
         animationFrame = globalThis.requestAnimationFrame(attach);
         return;
       }
-      update = () => setSize({ width: element.clientWidth, height: element.clientHeight });
+      update = () => {
+        if (resizeFrame !== null) return;
+        resizeFrame = globalThis.requestAnimationFrame(() => {
+          resizeFrame = null;
+          const width = element.clientWidth;
+          const height = element.clientHeight;
+          setSize((current) => current.width === width && current.height === height ? current : { width, height });
+        });
+      };
       update();
       if (globalThis.ResizeObserver) {
         observer = new ResizeObserver(update);
@@ -2152,6 +2206,7 @@ function useElementSize<T extends HTMLElement>(observeKey: unknown = true): [Ref
     attach();
     return () => {
       if (animationFrame !== null) globalThis.cancelAnimationFrame(animationFrame);
+      if (resizeFrame !== null) globalThis.cancelAnimationFrame(resizeFrame);
       observer?.disconnect();
       if (update && !globalThis.ResizeObserver) globalThis.removeEventListener("resize", update);
     };
@@ -2173,6 +2228,15 @@ function LayoutGlyph({ mode }: { mode: LayoutMode }): ReactElement {
 const EDITOR_HISTORY_LIMIT = 100;
 const EDITOR_HISTORY_COMMIT_DELAY_MS = 250;
 const VERSION_HISTORY_LIMIT = 80;
+const versionSnapshotFingerprintCache = new WeakMap<object, { obstacles: FieldObstacle[]; value: string }>();
+
+function versionSnapshotFingerprint(snapshot: EditorSnapshot, obstacles: FieldObstacle[]): string {
+  const cached = versionSnapshotFingerprintCache.get(snapshot);
+  if (cached?.obstacles === obstacles) return cached.value;
+  const value = JSON.stringify([snapshot.activePathNodeId, snapshot.treeNodes, snapshot.pathDataByName, obstacles]);
+  versionSnapshotFingerprintCache.set(snapshot, { obstacles, value });
+  return value;
+}
 
 function editorSnapshotsMatch(left: EditorSnapshot, right: EditorSnapshot): boolean {
   return left.treeNodes === right.treeNodes
@@ -2259,6 +2323,8 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const playbackTimelineRef = useRef<HTMLInputElement>(null);
   const playbackTimeLabelRef = useRef<HTMLSpanElement>(null);
   const focusTreeModalRef = useRef<HTMLElement>(null);
+  const treeSvgRef = useRef<SVGSVGElement>(null);
+  const treeNodesLayerRef = useRef<HTMLDivElement>(null);
   const editorHistoryRef = useRef<EditorHistory | null>(null);
   const versionHistoryRef = useRef<VersionHistorySnapshot[]>([]);
   const editorSnapshotRef = useRef<EditorSnapshot>({ treeNodes, pathDataByName, activePathNodeId });
@@ -2302,11 +2368,31 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   }, [activePathNodeId, treeNodes]);
 
   const activePathName = activePathNode?.name ?? null;
-  const activePathData = activePathName ? pathDataByName[activePathName] ?? createEmptyPathData() : createEmptyPathData();
-  const activeMaxPosition = maxPathPosition(activePathData);
-  const playbackPlan = useMemo(() => buildPlaybackPlan(activePathData, settings), [activePathData, settings]);
-  const playbackPose = poseAtPlaybackTime(activePathData, playbackPlan, playbackTimeRef.current);
-  const playbackVelocity = playbackVelocityAtTime(activePathData, playbackPlan, playbackTimeRef.current);
+  const activePathData = activePathName ? pathDataByName[activePathName] ?? EMPTY_PATH_DATA : EMPTY_PATH_DATA;
+  const activeMaxPosition = useMemo(() => maxPathPosition(activePathData), [activePathData]);
+  const playbackPlan = useMemo(() => buildPlaybackPlan(activePathData, settings), [
+    activePathData,
+    settings.cteControllerD,
+    settings.cteControllerI,
+    settings.cteControllerP,
+    settings.defaultIntermediateHandOffRadiusMeters,
+    settings.endRotationToleranceDegrees,
+    settings.endTranslationToleranceMeters,
+    settings.maxRotationalAcceleration,
+    settings.maxRotationalVelocity,
+    settings.maxTranslationalAcceleration,
+    settings.maxTranslationalVelocity,
+    settings.rotationalControllerD,
+    settings.rotationalControllerI,
+    settings.rotationalControllerP,
+    settings.translationalControllerD,
+    settings.translationalControllerI,
+    settings.translationalControllerP,
+  ]);
+  const playbackPose = playbackOpen ? poseAtPlaybackTime(activePathData, playbackPlan, playbackTimeRef.current) : null;
+  const playbackVelocity = playbackOpen
+    ? playbackVelocityAtTime(activePathData, playbackPlan, playbackTimeRef.current)
+    : { vx: 0, vy: 0, omega: 0 };
   const applyPlaybackVisualTime = useCallback((requestedTime: number): void => {
     const nextTime = clamp(requestedTime, 0, playbackPlan.totalDuration);
     playbackTimeRef.current = nextTime;
@@ -2733,12 +2819,17 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     const history = versionHistoryRef.current;
     const latest = history.at(-1);
     const sameAsLatest = latest
-      && JSON.stringify(latest.treeNodes) === JSON.stringify(snapshot.treeNodes)
-      && JSON.stringify(latest.pathDataByName) === JSON.stringify(snapshot.pathDataByName)
-      && latest.activePathNodeId === snapshot.activePathNodeId
-      && JSON.stringify(latest.obstacles ?? []) === JSON.stringify(obstacles);
+      && versionSnapshotFingerprint(latest, latest.obstacles ?? []) === versionSnapshotFingerprint(snapshot, obstacles);
     if (sameAsLatest) return history;
-    const nextHistory = [...history, { ...snapshot, obstacles: obstacles.map((obstacle) => ({ ...obstacle })), id: createId("version"), timestamp: Date.now(), source } as VersionHistorySnapshot].slice(-VERSION_HISTORY_LIMIT);
+    const nextSnapshot = {
+      ...snapshot,
+      obstacles: obstacles.map((obstacle) => ({ ...obstacle })),
+      id: createId("version"),
+      timestamp: Date.now(),
+      source,
+    } as VersionHistorySnapshot;
+    versionSnapshotFingerprint(nextSnapshot, nextSnapshot.obstacles ?? []);
+    const nextHistory = [...history, nextSnapshot].slice(-VERSION_HISTORY_LIMIT);
     versionHistoryRef.current = nextHistory;
     setVersionHistory(nextHistory);
     return nextHistory;
@@ -3351,15 +3442,17 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       const startPoint = pointToPixels(settings, fieldOneSize, waypoint);
       let moved = false;
 
-      const onPointerMove = (moveEvent: PointerEvent): void => {
-        const dx = moveEvent.clientX - startMouse.x;
-        const dy = moveEvent.clientY - startMouse.y;
+      const pointerFrame = createPointerFrameScheduler((clientX, clientY) => {
+        const dx = clientX - startMouse.x;
+        const dy = clientY - startMouse.y;
         if (Math.abs(dx) > 2 || Math.abs(dy) > 2) moved = true;
         const nextPoint = clampMeterPoint(settings, pixelsToPoint(settings, fieldOneSize, { x: startPoint.x + dx, y: startPoint.y + dy }));
         updateWaypoint(waypoint.id, nextPoint);
-      };
+      });
+      const onPointerMove = (moveEvent: PointerEvent): void => pointerFrame.schedule(moveEvent.clientX, moveEvent.clientY);
 
       const onPointerUp = (upEvent: PointerEvent): void => {
+        pointerFrame.flush();
         window.removeEventListener("pointermove", onPointerMove);
         window.removeEventListener("pointerup", onPointerUp);
         dragOperationRef.current = null;
@@ -3377,6 +3470,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       window.addEventListener("pointermove", onPointerMove);
       window.addEventListener("pointerup", onPointerUp);
       dragOperationRef.current = () => {
+        pointerFrame.cancel();
         window.removeEventListener("pointermove", onPointerMove);
         window.removeEventListener("pointerup", onPointerUp);
       };
@@ -3392,18 +3486,20 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       if (!fieldRect) return;
       setActiveRotationHandleId(`waypoint-${waypoint.id}`);
 
-      const onPointerMove = (moveEvent: PointerEvent): void => {
+      const pointerFrame = createPointerFrameScheduler((clientX, clientY) => {
         const center = pointToPixels(settings, fieldOneSize, waypoint);
         const angle = pointerToCompassDegrees(
-          moveEvent.clientX,
-          moveEvent.clientY,
+          clientX,
+          clientY,
           fieldRect.left + center.x,
           fieldRect.top + center.y,
         );
         updateWaypoint(waypoint.id, { angle: Number(angle.toFixed(2)) });
-      };
+      });
+      const onPointerMove = (moveEvent: PointerEvent): void => pointerFrame.schedule(moveEvent.clientX, moveEvent.clientY);
 
       const onPointerUp = (): void => {
+        pointerFrame.flush();
         setActiveRotationHandleId(null);
         window.removeEventListener("pointermove", onPointerMove);
         window.removeEventListener("pointerup", onPointerUp);
@@ -3413,6 +3509,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       window.addEventListener("pointermove", onPointerMove);
       window.addEventListener("pointerup", onPointerUp);
       dragOperationRef.current = () => {
+        pointerFrame.cancel();
         setActiveRotationHandleId(null);
         window.removeEventListener("pointermove", onPointerMove);
         window.removeEventListener("pointerup", onPointerUp);
@@ -3430,18 +3527,20 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       if (!fieldRect || !point) return;
       setActiveRotationHandleId(`target-${target.id}`);
 
-      const onPointerMove = (moveEvent: PointerEvent): void => {
+      const pointerFrame = createPointerFrameScheduler((clientX, clientY) => {
         const center = pointToPixels(settings, fieldOneSize, point);
         const angle = pointerToCompassDegrees(
-          moveEvent.clientX,
-          moveEvent.clientY,
+          clientX,
+          clientY,
           fieldRect.left + center.x,
           fieldRect.top + center.y,
         );
         updateRotationTarget(target.id, { angle: Number(angle.toFixed(2)) });
-      };
+      });
+      const onPointerMove = (moveEvent: PointerEvent): void => pointerFrame.schedule(moveEvent.clientX, moveEvent.clientY);
 
       const onPointerUp = (): void => {
+        pointerFrame.flush();
         setActiveRotationHandleId(null);
         window.removeEventListener("pointermove", onPointerMove);
         window.removeEventListener("pointerup", onPointerUp);
@@ -3451,6 +3550,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       window.addEventListener("pointermove", onPointerMove);
       window.addEventListener("pointerup", onPointerUp);
       dragOperationRef.current = () => {
+        pointerFrame.cancel();
         setActiveRotationHandleId(null);
         window.removeEventListener("pointermove", onPointerMove);
         window.removeEventListener("pointerup", onPointerUp);
@@ -3476,8 +3576,10 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
 
       moveTo(event.clientX, event.clientY);
 
-      const onPointerMove = (moveEvent: PointerEvent): void => moveTo(moveEvent.clientX, moveEvent.clientY);
+      const pointerFrame = createPointerFrameScheduler(moveTo);
+      const onPointerMove = (moveEvent: PointerEvent): void => pointerFrame.schedule(moveEvent.clientX, moveEvent.clientY);
       const onPointerUp = (): void => {
+        pointerFrame.flush();
         window.removeEventListener("pointermove", onPointerMove);
         window.removeEventListener("pointerup", onPointerUp);
         dragOperationRef.current = null;
@@ -3486,6 +3588,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       window.addEventListener("pointermove", onPointerMove);
       window.addEventListener("pointerup", onPointerUp);
       dragOperationRef.current = () => {
+        pointerFrame.cancel();
         window.removeEventListener("pointermove", onPointerMove);
         window.removeEventListener("pointerup", onPointerUp);
       };
@@ -3514,13 +3617,28 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
 
   const beginTreePan = useCallback((event: ReactPointerEvent<HTMLDivElement>): void => {
     if ((event.target as HTMLElement).closest(".tree-node, .tree-menu, .tree-add-menu")) return;
+    const svgElement = treeSvgRef.current;
+    const nodesElement = treeNodesLayerRef.current;
+    if (!svgElement || !nodesElement) return;
+    event.preventDefault();
     const start = { x: event.clientX - pan.x, y: event.clientY - pan.y };
+    let nextPan = pan;
+    svgElement.classList.add("is-panning");
+    nodesElement.classList.add("is-panning");
 
-    const onPointerMove = (moveEvent: PointerEvent): void => {
-      setPan({ x: moveEvent.clientX - start.x, y: moveEvent.clientY - start.y });
-    };
+    const pointerFrame = createPointerFrameScheduler((clientX, clientY) => {
+      nextPan = { x: clientX - start.x, y: clientY - start.y };
+      const transform = `translate3d(${nextPan.x}px, ${nextPan.y}px, 0)`;
+      svgElement.style.transform = transform;
+      nodesElement.style.transform = transform;
+    });
+    const onPointerMove = (moveEvent: PointerEvent): void => pointerFrame.schedule(moveEvent.clientX, moveEvent.clientY);
 
     const onPointerUp = (): void => {
+      pointerFrame.flush();
+      svgElement.classList.remove("is-panning");
+      nodesElement.classList.remove("is-panning");
+      setPan((current) => current.x === nextPan.x && current.y === nextPan.y ? current : nextPan);
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
       dragOperationRef.current = null;
@@ -3529,10 +3647,13 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
     dragOperationRef.current = () => {
+      pointerFrame.cancel();
+      svgElement.classList.remove("is-panning");
+      nodesElement.classList.remove("is-panning");
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
     };
-  }, [pan.x, pan.y]);
+  }, [pan]);
 
   const beginTreeModalDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>): void => {
     if (settings.layoutMode !== "focus" || (event.target as HTMLElement).closest("button, input, .tree-add-wrapper")) return;
@@ -3547,12 +3668,14 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     let nextX = startRect.x;
     let nextY = startRect.y;
 
-    const onPointerMove = (moveEvent: PointerEvent): void => {
-      nextX = clamp(startRect.x + moveEvent.clientX - startPointer.x, 0, Math.max(0, bounds.width - startRect.width));
-      nextY = clamp(startRect.y + moveEvent.clientY - startPointer.y, 0, Math.max(0, bounds.height - 42));
+    const pointerFrame = createPointerFrameScheduler((clientX, clientY) => {
+      nextX = clamp(startRect.x + clientX - startPointer.x, 0, Math.max(0, bounds.width - startRect.width));
+      nextY = clamp(startRect.y + clientY - startPointer.y, 0, Math.max(0, bounds.height - 42));
       modalElement.style.transform = `translate3d(${nextX - startRect.x}px, ${nextY - startRect.y}px, 0)`;
-    };
+    });
+    const onPointerMove = (moveEvent: PointerEvent): void => pointerFrame.schedule(moveEvent.clientX, moveEvent.clientY);
     const onPointerUp = (): void => {
+      pointerFrame.flush();
       modalElement.style.left = `${nextX}px`;
       modalElement.style.top = `${nextY}px`;
       modalElement.style.transform = "";
@@ -3565,6 +3688,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
     dragOperationRef.current = () => {
+      pointerFrame.cancel();
       modalElement.style.transform = "";
       modalElement.classList.remove("is-dragging");
       window.removeEventListener("pointermove", onPointerMove);
@@ -3586,13 +3710,15 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     let nextWidth = startRect.width;
     let nextHeight = startRect.height;
 
-    const onPointerMove = (moveEvent: PointerEvent): void => {
-      nextWidth = clamp(startRect.width + moveEvent.clientX - startPointer.x, 320, Math.max(320, bounds.width - startRect.x));
-      nextHeight = clamp(startRect.height + moveEvent.clientY - startPointer.y, 230, Math.max(230, bounds.height - startRect.y));
+    const pointerFrame = createPointerFrameScheduler((clientX, clientY) => {
+      nextWidth = clamp(startRect.width + clientX - startPointer.x, 320, Math.max(320, bounds.width - startRect.x));
+      nextHeight = clamp(startRect.height + clientY - startPointer.y, 230, Math.max(230, bounds.height - startRect.y));
       modalElement.style.width = `${nextWidth}px`;
       modalElement.style.height = `${nextHeight}px`;
-    };
+    });
+    const onPointerMove = (moveEvent: PointerEvent): void => pointerFrame.schedule(moveEvent.clientX, moveEvent.clientY);
     const onPointerUp = (): void => {
+      pointerFrame.flush();
       modalElement.classList.remove("is-resizing");
       setTreeModalRect((current) => ({ ...current, width: nextWidth, height: nextHeight }));
       window.removeEventListener("pointermove", onPointerMove);
@@ -3602,6 +3728,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
     dragOperationRef.current = () => {
+      pointerFrame.cancel();
       modalElement.classList.remove("is-resizing");
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
@@ -3659,21 +3786,66 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
 
   const beginNodeDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>, node: PathTreeNode): void => {
     event.stopPropagation();
+    const nodeElement = event.currentTarget;
     const startMouse = { x: event.clientX, y: event.clientY };
     const startNode = { x: node.x, y: node.y };
+    const nodesById = new Map(treeNodes.map((candidate) => [candidate.id, candidate]));
+    const connectedEdges = treeNodes.flatMap((parent) => getNodeChildren(parent).map((child) => ({
+      parent,
+      child: nodesById.get(child.id),
+      slot: child.slot,
+    }))).filter((edge): edge is { parent: PathTreeNode; child: PathTreeNode; slot: ChildSlot } => (
+      Boolean(edge.child) && (edge.parent.id === node.id || edge.child?.id === node.id)
+    ));
+    const edgeElements = new Map<string, SVGGElement>();
+    treeSvgRef.current?.querySelectorAll<SVGGElement>("[data-tree-edge-key]").forEach((element) => {
+      const key = element.dataset.treeEdgeKey;
+      if (key) edgeElements.set(key, element);
+    });
+    let nextX = startNode.x;
+    let nextY = startNode.y;
     let moved = false;
 
-    const onPointerMove = (moveEvent: PointerEvent): void => {
-      const dx = moveEvent.clientX - startMouse.x;
-      const dy = moveEvent.clientY - startMouse.y;
+    nodeElement.classList.add("is-dragging");
+    const renderDrag = (clientX: number, clientY: number): void => {
+      const dx = clientX - startMouse.x;
+      const dy = clientY - startMouse.y;
       if (Math.abs(dx) > 2 || Math.abs(dy) > 2) moved = true;
-      setTreeNodes((previous) => previous.map((candidate) => (candidate.id === node.id ? { ...candidate, x: startNode.x + dx, y: startNode.y + dy } : candidate)));
+      nextX = startNode.x + dx;
+      nextY = startNode.y + dy;
+      nodeElement.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
+
+      connectedEdges.forEach(({ parent, child, slot }) => {
+        const movedParent = parent.id === node.id ? { ...parent, x: nextX, y: nextY } : parent;
+        const movedChild = child.id === node.id ? { ...child, x: nextX, y: nextY } : child;
+        const geometry = nearestTreeEdgeGeometry(movedParent, movedChild);
+        const edgeElement = edgeElements.get(`${parent.id}::${child.id}::${slot}`);
+        const pathElement = edgeElement?.querySelector("path");
+        const labelElement = edgeElement?.querySelector("text");
+        pathElement?.setAttribute("d", `M ${geometry.start.x} ${geometry.start.y} C ${geometry.startControl.x} ${geometry.startControl.y}, ${geometry.endControl.x} ${geometry.endControl.y}, ${geometry.end.x} ${geometry.end.y}`);
+        labelElement?.setAttribute("x", String(geometry.label.x));
+        labelElement?.setAttribute("y", String(geometry.label.y - 7));
+      });
     };
+    const pointerFrame = createPointerFrameScheduler(renderDrag);
+    const onPointerMove = (moveEvent: PointerEvent): void => pointerFrame.schedule(moveEvent.clientX, moveEvent.clientY);
 
     const onPointerUp = (): void => {
+      pointerFrame.flush();
+      if (!moved) renderDrag(startMouse.x, startMouse.y);
+      nodeElement.classList.remove("is-dragging");
+      nodeElement.style.left = `${nextX}px`;
+      nodeElement.style.top = `${nextY}px`;
+      nodeElement.style.transform = "";
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
       dragOperationRef.current = null;
+      if (moved) {
+        setTreeNodes((previous) => previous.map((candidate) => (
+          candidate.id === node.id ? { ...candidate, x: nextX, y: nextY } : candidate
+        )));
+        return;
+      }
       if (!moved && pendingConnection) {
         connectPendingToNode(node.id);
         return;
@@ -3687,10 +3859,13 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
     dragOperationRef.current = () => {
+      pointerFrame.cancel();
+      nodeElement.classList.remove("is-dragging");
+      nodeElement.style.transform = "";
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
     };
-  }, [activatePathNode, connectPendingToNode, pendingConnection]);
+  }, [activatePathNode, connectPendingToNode, pendingConnection, treeNodes]);
 
   const showCanvasMenu = useCallback((event: ReactMouseEvent<HTMLDivElement>): void => {
     if ((event.target as HTMLElement).closest(".tree-node, .tree-edge-label")) return;
@@ -3756,15 +3931,17 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     let nextX = modal.x;
     let nextY = modal.y;
 
-    const onPointerMove = (moveEvent: PointerEvent): void => {
+    const pointerFrame = createPointerFrameScheduler((clientX, clientY) => {
       const offset = draggingModalRef.current;
       if (!offset) return;
-      nextX = clamp(moveEvent.clientX - appRect.left - offset.offsetX, 4, appRect.width - 260);
-      nextY = clamp(moveEvent.clientY - appRect.top - offset.offsetY, 44, appRect.height - 120);
+      nextX = clamp(clientX - appRect.left - offset.offsetX, 4, appRect.width - 260);
+      nextY = clamp(clientY - appRect.top - offset.offsetY, 44, appRect.height - 120);
       modalElement.style.transform = `translate3d(${nextX - modal.x}px, ${nextY - modal.y}px, 0)`;
-    };
+    });
+    const onPointerMove = (moveEvent: PointerEvent): void => pointerFrame.schedule(moveEvent.clientX, moveEvent.clientY);
 
     const onPointerUp = (): void => {
+      pointerFrame.flush();
       modalElement.style.left = `${nextX}px`;
       modalElement.style.top = `${nextY}px`;
       modalElement.style.transform = "";
@@ -3779,6 +3956,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
     dragOperationRef.current = () => {
+      pointerFrame.cancel();
       modalElement.style.transform = "";
       modalElement.classList.remove("is-dragging");
       draggingModalRef.current = null;
@@ -3810,12 +3988,14 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     let nextX = playbackModalPosition.x;
     let nextY = playbackModalPosition.y;
 
-    const onPointerMove = (moveEvent: PointerEvent): void => {
-      nextX = clamp(moveEvent.clientX - appRect.left - offset.x, 4, Math.max(4, appRect.width - 564));
-      nextY = clamp(moveEvent.clientY - appRect.top - offset.y, 44, Math.max(44, appRect.height - 190));
+    const pointerFrame = createPointerFrameScheduler((clientX, clientY) => {
+      nextX = clamp(clientX - appRect.left - offset.x, 4, Math.max(4, appRect.width - 564));
+      nextY = clamp(clientY - appRect.top - offset.y, 44, Math.max(44, appRect.height - 190));
       modalElement.style.transform = `translate3d(${nextX - playbackModalPosition.x}px, ${nextY - playbackModalPosition.y}px, 0)`;
-    };
+    });
+    const onPointerMove = (moveEvent: PointerEvent): void => pointerFrame.schedule(moveEvent.clientX, moveEvent.clientY);
     const onPointerUp = (): void => {
+      pointerFrame.flush();
       modalElement.style.left = `${nextX}px`;
       modalElement.style.top = `${nextY}px`;
       modalElement.style.transform = "";
@@ -3829,6 +4009,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
     dragOperationRef.current = () => {
+      pointerFrame.cancel();
       modalElement.style.transform = "";
       modalElement.classList.remove("is-dragging");
       window.removeEventListener("pointermove", onPointerMove);
@@ -4144,8 +4325,10 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       });
     };
     move(event.clientX, event.clientY);
-    const onPointerMove = (moveEvent: PointerEvent): void => move(moveEvent.clientX, moveEvent.clientY);
+    const pointerFrame = createPointerFrameScheduler(move);
+    const onPointerMove = (moveEvent: PointerEvent): void => pointerFrame.schedule(moveEvent.clientX, moveEvent.clientY);
     const onPointerUp = (): void => {
+      pointerFrame.flush();
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
       dragOperationRef.current = null;
@@ -4153,6 +4336,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
     dragOperationRef.current = () => {
+      pointerFrame.cancel();
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
     };
@@ -4191,8 +4375,10 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       });
     };
     resize(event.clientX, event.clientY);
-    const onPointerMove = (moveEvent: PointerEvent): void => resize(moveEvent.clientX, moveEvent.clientY);
+    const pointerFrame = createPointerFrameScheduler(resize);
+    const onPointerMove = (moveEvent: PointerEvent): void => pointerFrame.schedule(moveEvent.clientX, moveEvent.clientY);
     const onPointerUp = (): void => {
+      pointerFrame.flush();
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
       dragOperationRef.current = null;
@@ -4200,6 +4386,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
     dragOperationRef.current = () => {
+      pointerFrame.cancel();
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
     };
@@ -4333,12 +4520,88 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     backgroundImage: settings.fieldImageDataUrl ? `url(${settings.fieldImageDataUrl})` : undefined,
   }), [settings.fieldImageDataUrl, settings.fieldLengthMeters, settings.fieldWidthMeters]);
 
+  const liveTrailFieldOnePoints = useMemo(() => livePoseTrail.map((pose) => {
+    const point = pointToPixels(settings, fieldOneSize, pose);
+    return `${point.x},${point.y}`;
+  }).join(" "), [fieldOneSize, livePoseTrail, settings]);
+
+  const liveTrailFieldTwoPoints = useMemo(() => livePoseTrail.map((pose) => {
+    const point = pointToPixels(settings, fieldTwoSize, pose);
+    return `${point.x},${point.y}`;
+  }).join(" "), [fieldTwoSize, livePoseTrail, settings]);
+
   const treeEdges = useMemo(() => {
     const byId = new Map(treeNodes.map((node) => [node.id, node]));
     return treeNodes
       .flatMap((node) => getNodeChildren(node).map((child) => ({ parent: node, child: byId.get(child.id), label: child.label, slot: child.slot })))
       .filter((edge): edge is { parent: PathTreeNode; child: PathTreeNode; label: string; slot: ChildSlot } => Boolean(edge.child));
   }, [treeNodes]);
+
+  const treeEdgeElements = useMemo(() => treeEdges.map(({ parent, child, label, slot }) => {
+    const geometry = nearestTreeEdgeGeometry(parent, child);
+    const d = `M ${geometry.start.x} ${geometry.start.y} C ${geometry.startControl.x} ${geometry.startControl.y}, ${geometry.endControl.x} ${geometry.endControl.y}, ${geometry.end.x} ${geometry.end.y}`;
+    return (
+      <g key={`${parent.id}-${child.id}-${slot}`} data-tree-edge-key={`${parent.id}::${child.id}::${slot}`}>
+        <path className={`tree-edge tree-edge-${slot}`} d={d} style={{ pointerEvents: "none" }} />
+        <text
+          className="tree-edge-label"
+          x={geometry.label.x}
+          y={geometry.label.y - 7}
+          style={{ cursor: "context-menu", pointerEvents: "auto" }}
+          onPointerDown={(event) => event.stopPropagation()}
+          onContextMenu={(event) => showEdgeMenu(event, parent.id, child.id, slot, label)}
+        >
+          {label}
+        </text>
+      </g>
+    );
+  }), [showEdgeMenu, treeEdges]);
+
+  const treeNodeElements = useMemo(() => treeNodes.map((node) => (
+    <div
+      key={node.id}
+      data-tree-node-id={node.id}
+      className={`tree-node tree-node-${node.kind} ${node.editing ? "is-editing" : ""} ${node.selectedForRoutine ? "is-routine" : ""} ${selectedTreeNodeId === node.id ? "is-selected" : ""}`}
+      style={{
+        left: `${node.x}px`,
+        top: `${node.y}px`,
+        width: `${NODE_WIDTH}px`,
+        height: `${NODE_HEIGHT}px`,
+        ...(node.selectedForRoutine
+          ? { background: "rgba(56, 189, 248, 0.22)", borderColor: "rgba(125, 211, 252, 0.92)" }
+          : {}),
+      }}
+      onPointerDown={(event) => beginNodeDrag(event, node)}
+      onContextMenu={(event) => showNodeMenu(event, node.id)}
+      onDoubleClick={(event) => {
+        event.stopPropagation();
+        startRename(node);
+      }}
+    >
+      {renamingNodeId === node.id ? (
+        <input
+          className="rename-input"
+          autoFocus
+          value={renameDraft}
+          onChange={(event) => setRenameDraft(event.target.value)}
+          onPointerDown={(event) => event.stopPropagation()}
+          onBlur={commitRename}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") commitRename();
+            if (event.key === "Escape") {
+              setRenamingNodeId(null);
+              setRenameDraft("");
+            }
+          }}
+        />
+      ) : (
+        <>
+          <strong>{node.name}</strong>
+          <span>{treeKindDescription(node.kind)}</span>
+        </>
+      )}
+    </div>
+  )), [beginNodeDrag, commitRename, renameDraft, renamingNodeId, selectedTreeNodeId, showNodeMenu, startRename, treeNodes]);
 
   const activeWaypointModal = modal?.kind === "waypoint" ? activePathData.waypoints.find((waypoint) => waypoint.id === modal.id) ?? null : null;
   const activeRotationTargetModal = modal?.kind === "rotationTarget" ? activePathData.rotationTargets.find((target) => target.id === modal.id) ?? null : null;
@@ -4505,6 +4768,20 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                           {settings.showObstacleZones ? <Eye aria-hidden="true" /> : <EyeOff aria-hidden="true" />}
                           <span>{settings.showObstacleZones ? "Hide obstacles" : "Show obstacles"}</span>
                         </button>
+                        <button
+                          type="button"
+                          role="menuitemcheckbox"
+                          aria-checked={settings.showHandoffRadii}
+                          className={settings.showHandoffRadii ? "is-checked" : ""}
+                          onClick={() => {
+                            updateSettings({ showHandoffRadii: !settings.showHandoffRadii });
+                            setMoreToolsOpen(false);
+                          }}
+                          title={settings.showHandoffRadii ? "Hide waypoint handoff radius labels" : "Show waypoint handoff radius labels"}
+                        >
+                          {settings.showHandoffRadii ? <Eye aria-hidden="true" /> : <EyeOff aria-hidden="true" />}
+                          <span>{settings.showHandoffRadii ? "Hide handoff radii" : "Show handoff radii"}</span>
+                        </button>
                       </div>
                     ) : null}
                   </div>
@@ -4594,11 +4871,11 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                 </div>
               ))}
 
-              {activePathData.waypoints.map((waypoint, index) => (
+              {settings.showHandoffRadii ? activePathData.waypoints.map((waypoint) => (
                 <div key={`circle-${waypoint.id}`} className="handoff-circle" style={handoffCircleStyle(settings, fieldOneSize, waypoint)}>
                   <span>{formatNumber(waypoint.handoff, 2)}m</span>
                 </div>
-              ))}
+              )) : null}
 
               {activePathData.waypoints.map((waypoint, index) => (
                 <div
@@ -4737,10 +5014,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                     <svg className="field-svg live-trail-svg" viewBox={`0 0 ${Math.max(1, fieldOneSize.width)} ${Math.max(1, fieldOneSize.height)}`} aria-hidden="true">
                       <polyline
                         className="live-pose-trail"
-                        points={livePoseTrail.map((pose) => {
-                          const point = pointToPixels(settings, fieldOneSize, pose);
-                          return `${point.x},${point.y}`;
-                        }).join(" ")}
+                        points={liveTrailFieldOnePoints}
                       />
                     </svg>
                   ) : null}
@@ -4806,10 +5080,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                 <svg className="field-svg live-trail-svg" viewBox={`0 0 ${Math.max(1, fieldTwoSize.width)} ${Math.max(1, fieldTwoSize.height)}`} aria-hidden="true">
                   <polyline
                     className="live-pose-trail"
-                    points={livePoseTrail.map((pose) => {
-                      const point = pointToPixels(settings, fieldTwoSize, pose);
-                      return `${point.x},${point.y}`;
-                    }).join(" ")}
+                    points={liveTrailFieldTwoPoints}
                   />
                 </svg>
               ) : null}
@@ -4843,17 +5114,19 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
             const startWidth = panel.getBoundingClientRect().width;
             const startHeight = panel.getBoundingClientRect().height;
             const workspaceBounds = workspace.getBoundingClientRect();
-            const onPointerMove = (moveEvent: PointerEvent): void => {
+            const pointerFrame = createPointerFrameScheduler((clientX, clientY) => {
               if (settings.layoutMode === "horizontal") {
-                const nextHeight = clamp(startHeight + moveEvent.clientY - startY, 240, workspaceBounds.height - 220);
+                const nextHeight = clamp(startHeight + clientY - startY, 240, workspaceBounds.height - 220);
                 workspace.style.gridTemplateRows = `${nextHeight}px 8px minmax(220px, 1fr)`;
                 return;
               }
               const direction = settings.layoutMode === "mirrored" ? -1 : 1;
-              const nextWidth = clamp(startWidth + (moveEvent.clientX - startX) * direction, 260, workspaceBounds.width - 320);
+              const nextWidth = clamp(startWidth + (clientX - startX) * direction, 260, workspaceBounds.width - 320);
               panel.style.width = `${nextWidth}px`;
-            };
+            });
+            const onPointerMove = (moveEvent: PointerEvent): void => pointerFrame.schedule(moveEvent.clientX, moveEvent.clientY);
             const onPointerUp = (): void => {
+              pointerFrame.flush();
               window.removeEventListener("pointermove", onPointerMove);
               window.removeEventListener("pointerup", onPointerUp);
             };
@@ -4923,72 +5196,11 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                 {pathTreeNodes.length > 0 ? <button type="button" onClick={(event) => { event.stopPropagation(); focusNearestPathNode(); }}>Recover</button> : null}
               </div>
             ) : null}
-            <svg className="tree-svg" style={{ transform: `translate(${pan.x}px, ${pan.y}px)`, pointerEvents: "auto" }} width="3200" height="2200">
-              {treeEdges.map(({ parent, child, label, slot }) => {
-                const geometry = nearestTreeEdgeGeometry(parent, child);
-                const d = `M ${geometry.start.x} ${geometry.start.y} C ${geometry.startControl.x} ${geometry.startControl.y}, ${geometry.endControl.x} ${geometry.endControl.y}, ${geometry.end.x} ${geometry.end.y}`;
-                return (
-                  <g key={`${parent.id}-${child.id}-${slot}`}>
-                    <path className={`tree-edge tree-edge-${slot}`} d={d} style={{ pointerEvents: "none" }} />
-                    <text
-                      className="tree-edge-label"
-                      x={geometry.label.x}
-                      y={geometry.label.y - 7}
-                      style={{ cursor: "context-menu", pointerEvents: "auto" }}
-                      onPointerDown={(event) => event.stopPropagation()}
-                      onContextMenu={(event) => showEdgeMenu(event, parent.id, child.id, slot, label)}
-                    >
-                      {label}
-                    </text>
-                  </g>
-                );
-              })}
+            <svg ref={treeSvgRef} className="tree-svg" style={{ transform: `translate3d(${pan.x}px, ${pan.y}px, 0)`, pointerEvents: "auto" }} width="3200" height="2200">
+              {treeEdgeElements}
             </svg>
-            <div className="tree-nodes-layer" style={{ transform: `translate(${pan.x}px, ${pan.y}px)` }}>
-              {treeNodes.map((node) => (
-                <div
-                  key={node.id}
-                  className={`tree-node tree-node-${node.kind} ${node.editing ? "is-editing" : ""} ${node.selectedForRoutine ? "is-routine" : ""} ${selectedTreeNodeId === node.id ? "is-selected" : ""}`}
-                  style={{
-                    left: `${node.x}px`,
-                    top: `${node.y}px`,
-                    width: `${NODE_WIDTH}px`,
-                    height: `${NODE_HEIGHT}px`,
-                    ...(node.selectedForRoutine
-                      ? { background: "rgba(56, 189, 248, 0.22)", borderColor: "rgba(125, 211, 252, 0.92)" }
-                      : {}),
-                  }}
-                  onPointerDown={(event) => beginNodeDrag(event, node)}
-                  onContextMenu={(event) => showNodeMenu(event, node.id)}
-                  onDoubleClick={(event) => {
-                    event.stopPropagation();
-                    startRename(node);
-                  }}
-                >
-                  {renamingNodeId === node.id ? (
-                    <input
-                      className="rename-input"
-                      autoFocus
-                      value={renameDraft}
-                      onChange={(event) => setRenameDraft(event.target.value)}
-                      onPointerDown={(event) => event.stopPropagation()}
-                      onBlur={commitRename}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") commitRename();
-                        if (event.key === "Escape") {
-                          setRenamingNodeId(null);
-                          setRenameDraft("");
-                        }
-                      }}
-                    />
-                  ) : (
-                    <>
-                      <strong>{node.name}</strong>
-                      <span>{treeKindDescription(node.kind)}</span>
-                    </>
-                  )}
-                </div>
-              ))}
+            <div ref={treeNodesLayerRef} className="tree-nodes-layer" style={{ transform: `translate3d(${pan.x}px, ${pan.y}px, 0)` }}>
+              {treeNodeElements}
             </div>
           </div>
           {settings.layoutMode === "focus" && !treeModalMinimized ? (
@@ -5666,8 +5878,10 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                         });
                       };
                       updateCenter(event.clientX, event.clientY);
-                      const onPointerMove = (moveEvent: PointerEvent): void => updateCenter(moveEvent.clientX, moveEvent.clientY);
+                      const pointerFrame = createPointerFrameScheduler(updateCenter);
+                      const onPointerMove = (moveEvent: PointerEvent): void => pointerFrame.schedule(moveEvent.clientX, moveEvent.clientY);
                       const onPointerUp = (): void => {
+                        pointerFrame.flush();
                         window.removeEventListener("pointermove", onPointerMove);
                         window.removeEventListener("pointerup", onPointerUp);
                       };

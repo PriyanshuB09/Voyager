@@ -759,6 +759,16 @@ label {
   transform-origin: 0 0;
 }
 
+.tree-svg.is-panning,
+.tree-nodes-layer.is-panning,
+.tree-node.is-dragging {
+  will-change: transform;
+}
+
+.tree-node.is-dragging {
+  transition: none !important;
+}
+
 .tree-svg {
   pointer-events: none;
   overflow: visible;
