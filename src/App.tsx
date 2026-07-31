@@ -1,10 +1,17 @@
 import { useEntry } from "@frc-web-components/react";
 import {
   AlertTriangle,
+  Boxes,
+  Eye,
+  EyeOff,
+  GitBranch,
   History,
   LocateFixed,
   Palette,
+  Plus,
+  Route,
   Sparkles,
+  Trash2,
 } from "lucide-react";
 import React, {
   useCallback,
@@ -39,11 +46,15 @@ import {
 import "./styles/style.css";
 
 type OriginCorner = "bl" | "br" | "tl" | "tr";
-type AddElementKind = "waypoint" | "rotationTarget" | "eventTrigger" | "constraintZone";
+type AddElementKind = "waypoint" | "rotationTarget" | "eventTrigger" | "eventZone" | "constraintZone";
 type TreeKind = "path" | "if" | "loop" | "interrupt" | "event";
 type ChildSlot = "next" | "true" | "false" | "forloop" | "interruptable";
 type SaveStatusKind = "idle" | "saving" | "saved" | "error";
 type LayoutMode = "default" | "horizontal" | "mirrored" | "focus";
+type PlannerLevel = 0 | 1 | 2 | 3 | 4;
+type DesignPresetId = "precision-grid" | "editorial-intelligence" | "prism-console" | "terminal-blocks" | "readme-minimal";
+type PreferencesTab = "themes" | "designs";
+type ObstacleResizeEdge = "left" | "right" | "top" | "bottom";
 
 interface ThemePalette {
   background: string;
@@ -67,6 +78,25 @@ interface ThemePreset {
   name: string;
   description: string;
   palette: ThemePalette;
+}
+
+interface DesignPreset {
+  id: DesignPresetId;
+  name: string;
+  source: string;
+  description: string;
+  bodyFont: string;
+  displayFont: string;
+  monoFont: string;
+  baseFontSize: string;
+  navHeight: string;
+  controlHeight: string;
+  panelPadding: string;
+  radiusSmall: string;
+  radiusMedium: string;
+  radiusLarge: string;
+  buttonRadius: string;
+  shadow: string;
 }
 
 interface ElectronAPI {
@@ -129,6 +159,21 @@ interface Settings {
   customThemeName: string;
   customTheme: ThemePalette;
   autoSave: boolean;
+  autoSaveMetadata: boolean;
+  autoPublishOnConnect: boolean;
+  plannerWaypointDensity: PlannerLevel;
+  plannerSharpness: PlannerLevel;
+  designPreset: DesignPresetId;
+  showObstacleZones: boolean;
+}
+
+interface FieldObstacle {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  length: number;
+  width: number;
 }
 
 interface Waypoint {
@@ -153,6 +198,14 @@ interface EventTrigger {
   position: number;
 }
 
+interface EventZone {
+  id: string;
+  startName: string;
+  endName: string;
+  startPosition: number;
+  endPosition: number;
+}
+
 interface ConstraintZone {
   id: string;
   maxTranslationalVelocity: number;
@@ -167,6 +220,7 @@ interface SharedPathData {
   waypoints: Waypoint[];
   rotationTargets: RotationTarget[];
   events: EventTrigger[];
+  eventZones: EventZone[];
   constraintZones: ConstraintZone[];
 }
 
@@ -257,10 +311,16 @@ interface ConstraintZoneModalState extends ModalBase {
   id: string;
 }
 
+interface EventZoneModalState extends ModalBase {
+  kind: "eventZone";
+  id: string;
+}
+
 type ElementModalState =
   | WaypointModalState
   | RotationTargetModalState
   | EventTriggerModalState
+  | EventZoneModalState
   | ConstraintZoneModalState
   | null;
 
@@ -301,6 +361,26 @@ interface PersistedAppState {
   knownPathFileNames?: string[];
   activePathNodeId: string | null;
   pan: PixelPoint;
+  versionHistory?: VersionHistorySnapshot[];
+  obstacles?: FieldObstacle[];
+  activityLog?: ActivityLogEntry[];
+  selectedTreeNodeId?: string | null;
+  treeModalRect?: TreeModalRect;
+  treeModalMinimized?: boolean;
+  playbackModalPosition?: PixelPoint;
+}
+
+interface VersionHistorySnapshot extends EditorSnapshot {
+  id: string;
+  timestamp: number;
+  source: "manual" | "auto";
+  obstacles?: FieldObstacle[];
+}
+
+interface ProjectMetadataFile extends PersistedAppState {
+  schemaVersion: 1;
+  voyagerVersion: string;
+  savedAt: number;
 }
 
 interface EditorSnapshot {
@@ -415,8 +495,77 @@ const DB_NAME = "voyager-autonomous-builder";
 const DB_VERSION = 1;
 const DB_STORE = "kv";
 const APP_STATE_KEY = "app-state";
+const VOYAGER_VERSION = "3.1.1-alpha";
+const PROJECT_METADATA_FILE = "metadata.json";
 const NODE_WIDTH = 160;
 const NODE_HEIGHT = 62;
+
+type TreeNodeSide = "left" | "right" | "top" | "bottom";
+
+interface TreeNodeAnchor {
+  side: TreeNodeSide;
+  point: PixelPoint;
+  outward: PixelPoint;
+}
+
+interface TreeEdgeGeometry {
+  start: PixelPoint;
+  end: PixelPoint;
+  startControl: PixelPoint;
+  endControl: PixelPoint;
+  label: PixelPoint;
+}
+
+function treeNodeAnchors(node: PathTreeNode): TreeNodeAnchor[] {
+  return [
+    { side: "left", point: { x: node.x, y: node.y + NODE_HEIGHT / 2 }, outward: { x: -1, y: 0 } },
+    { side: "right", point: { x: node.x + NODE_WIDTH, y: node.y + NODE_HEIGHT / 2 }, outward: { x: 1, y: 0 } },
+    { side: "top", point: { x: node.x + NODE_WIDTH / 2, y: node.y }, outward: { x: 0, y: -1 } },
+    { side: "bottom", point: { x: node.x + NODE_WIDTH / 2, y: node.y + NODE_HEIGHT }, outward: { x: 0, y: 1 } },
+  ];
+}
+
+function nearestTreeEdgeGeometry(parent: PathTreeNode, child: PathTreeNode): TreeEdgeGeometry {
+  const parentAnchors = treeNodeAnchors(parent);
+  const childAnchors = treeNodeAnchors(child);
+  let bestParent = parentAnchors[0];
+  let bestChild = childAnchors[0];
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (const parentAnchor of parentAnchors) {
+    for (const childAnchor of childAnchors) {
+      const distance = Math.hypot(
+        childAnchor.point.x - parentAnchor.point.x,
+        childAnchor.point.y - parentAnchor.point.y,
+      );
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestParent = parentAnchor;
+        bestChild = childAnchor;
+      }
+    }
+  }
+
+  const controlDistance = Math.max(34, Math.min(140, bestDistance * 0.36));
+  const startControl = {
+    x: bestParent.point.x + bestParent.outward.x * controlDistance,
+    y: bestParent.point.y + bestParent.outward.y * controlDistance,
+  };
+  const endControl = {
+    x: bestChild.point.x + bestChild.outward.x * controlDistance,
+    y: bestChild.point.y + bestChild.outward.y * controlDistance,
+  };
+  return {
+    start: bestParent.point,
+    end: bestChild.point,
+    startControl,
+    endControl,
+    label: {
+      x: (bestParent.point.x + 3 * startControl.x + 3 * endControl.x + bestChild.point.x) / 8,
+      y: (bestParent.point.y + 3 * startControl.y + 3 * endControl.y + bestChild.point.y) / 8,
+    },
+  };
+}
 const THEME_PRESETS: ThemePreset[] = [
   {
     id: "voyager",
@@ -480,6 +629,99 @@ const THEME_PRESETS: ThemePreset[] = [
   },
 ];
 const DEFAULT_THEME = THEME_PRESETS[0];
+const DESIGN_PRESETS: DesignPreset[] = [
+  {
+    id: "precision-grid",
+    name: "Precision Grid",
+    source: "Vercel-inspired DESIGN.md",
+    description: "Tight geometric type, four-pixel rhythm, restrained elevation, and compact six-pixel controls.",
+    bodyFont: "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif",
+    displayFont: "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif",
+    monoFont: "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
+    baseFontSize: "13px",
+    navHeight: "52px",
+    controlHeight: "32px",
+    panelPadding: "12px",
+    radiusSmall: "6px",
+    radiusMedium: "8px",
+    radiusLarge: "12px",
+    buttonRadius: "6px",
+    shadow: "0 10px 32px rgba(0, 0, 0, 0.2)",
+  },
+  {
+    id: "editorial-intelligence",
+    name: "Editorial Intelligence",
+    source: "Claude-inspired DESIGN.md",
+    description: "Serif section titles, humanist body copy, generous padding, quiet shadows, and composed card rhythm.",
+    bodyFont: "'IBM Plex Sans', Inter, system-ui, sans-serif",
+    displayFont: "Georgia, 'Times New Roman', serif",
+    monoFont: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    baseFontSize: "14px",
+    navHeight: "58px",
+    controlHeight: "38px",
+    panelPadding: "18px",
+    radiusSmall: "8px",
+    radiusMedium: "12px",
+    radiusLarge: "16px",
+    buttonRadius: "8px",
+    shadow: "0 12px 36px rgba(0, 0, 0, 0.16)",
+  },
+  {
+    id: "prism-console",
+    name: "Prism Console",
+    source: "Raycast-inspired DESIGN.md",
+    description: "Roomy eight-pixel spacing, softly rounded surfaces, luminous depth, and highly legible Inter-style controls.",
+    bodyFont: "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif",
+    displayFont: "'SF Pro', Inter, system-ui, sans-serif",
+    monoFont: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    baseFontSize: "14px",
+    navHeight: "58px",
+    controlHeight: "38px",
+    panelPadding: "18px",
+    radiusSmall: "10px",
+    radiusMedium: "15px",
+    radiusLarge: "22px",
+    buttonRadius: "12px",
+    shadow: "0 22px 58px rgba(0, 0, 0, 0.32), 0 0 28px color-mix(in srgb, var(--accent) 8%, transparent)",
+  },
+  {
+    id: "terminal-blocks",
+    name: "Terminal Blocks",
+    source: "Warp-inspired DESIGN.md",
+    description: "Dense technical typography, low radii, compact padding, and block-like surfaces optimized for information throughput.",
+    bodyFont: "'IBM Plex Sans', Inter, system-ui, sans-serif",
+    displayFont: "'IBM Plex Sans', Inter, system-ui, sans-serif",
+    monoFont: "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
+    baseFontSize: "12px",
+    navHeight: "48px",
+    controlHeight: "30px",
+    panelPadding: "10px",
+    radiusSmall: "4px",
+    radiusMedium: "6px",
+    radiusLarge: "9px",
+    buttonRadius: "4px",
+    shadow: "0 8px 24px rgba(0, 0, 0, 0.3)",
+  },
+  {
+    id: "readme-minimal",
+    name: "README Minimal",
+    source: "Ollama-inspired DESIGN.md",
+    description: "Documentation-first hierarchy, pill controls, calm spacing, minimal shadows, and rounded system typography.",
+    bodyFont: "system-ui, -apple-system, 'Segoe UI', sans-serif",
+    displayFont: "'SF Pro', system-ui, -apple-system, 'Segoe UI', sans-serif",
+    monoFont: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    baseFontSize: "14px",
+    navHeight: "56px",
+    controlHeight: "36px",
+    panelPadding: "16px",
+    radiusSmall: "12px",
+    radiusMedium: "16px",
+    radiusLarge: "20px",
+    buttonRadius: "999px",
+    shadow: "0 8px 22px rgba(0, 0, 0, 0.12)",
+  },
+];
+const DEFAULT_DESIGN = DESIGN_PRESETS[0];
 const CUSTOM_THEME_FIELDS: Array<{ key: keyof ThemePalette; label: string }> = [
   { key: "background", label: "Background" },
   { key: "panel", label: "Panel" },
@@ -529,6 +771,12 @@ const DEFAULT_SETTINGS: Settings = {
   customThemeName: "My Voyager Theme",
   customTheme: { ...DEFAULT_THEME.palette },
   autoSave: false,
+  autoSaveMetadata: false,
+  autoPublishOnConnect: false,
+  plannerWaypointDensity: 2,
+  plannerSharpness: 2,
+  designPreset: DEFAULT_DESIGN.id,
+  showObstacleZones: true,
 };
 
 function createId(prefix: string): string {
@@ -670,7 +918,7 @@ async function idbSet<T>(key: string, value: T): Promise<void> {
 }
 
 function createEmptyPathData(): SharedPathData {
-  return { waypoints: [], rotationTargets: [], events: [], constraintZones: [] };
+  return { waypoints: [], rotationTargets: [], events: [], eventZones: [], constraintZones: [] };
 }
 
 function createDefaultWaypoint(settings: Settings): Waypoint {
@@ -698,6 +946,16 @@ function createDefaultEventTrigger(maxPosition: number): EventTrigger {
     id: createId("event"),
     name: "event",
     position: clamp(0.5, 0, maxPosition),
+  };
+}
+
+function createDefaultEventZone(maxPosition: number): EventZone {
+  return {
+    id: createId("event_zone"),
+    startName: "start_event",
+    endName: "end_event",
+    startPosition: clamp(0.25, 0, maxPosition),
+    endPosition: clamp(0.75, 0, maxPosition),
   };
 }
 
@@ -863,6 +1121,7 @@ function cloneSharedPathData(path: SharedPathData): SharedPathData {
     waypoints: path.waypoints.map((waypoint) => ({ ...waypoint, id: createId("waypoint") })),
     rotationTargets: path.rotationTargets.map((target) => ({ ...target, id: createId("rotation_target") })),
     events: path.events.map((event) => ({ ...event, id: createId("event") })),
+    eventZones: path.eventZones.map((zone) => ({ ...zone, id: createId("event_zone") })),
     constraintZones: path.constraintZones.map((zone) => ({ ...zone, id: createId("constraint") })),
   };
 }
@@ -986,6 +1245,12 @@ function getVoyagerDeployFolder(projectFolder: string): string {
   return [trimmed, "src", "main", "deploy", "voyager"].join(separator);
 }
 
+function getVoyagerAssetsFolder(projectFolder: string): string {
+  const deployFolder = getVoyagerDeployFolder(projectFolder);
+  const separator = deployFolder.includes("\\") ? "\\" : "/";
+  return [deployFolder, "assets"].join(separator);
+}
+
 function pointToPixels(settings: Settings, size: FieldSize, point: MeterPoint): PixelPoint {
   const pxPerMeterX = size.width / settings.fieldLengthMeters;
   const pxPerMeterY = size.height / settings.fieldWidthMeters;
@@ -1011,6 +1276,270 @@ function clampMeterPoint(settings: Settings, point: MeterPoint): MeterPoint {
     x: clamp(point.x, 0, settings.fieldLengthMeters),
     y: clamp(point.y, 0, settings.fieldWidthMeters),
   };
+}
+
+const PLANNER_LEVEL_LABELS = ["Very low", "Low", "Default", "High", "Very high"] as const;
+
+function normalizePlannerLevel(value: unknown): PlannerLevel {
+  return clamp(Math.round(cleanNumber(Number(value), 2)), 0, 4) as PlannerLevel;
+}
+
+function normalizeObstacle(value: Partial<FieldObstacle>, index: number, settings: Settings): FieldObstacle {
+  return {
+    id: typeof value.id === "string" && value.id ? value.id : createId("obstacle"),
+    name: typeof value.name === "string" && value.name.trim() ? value.name.trim() : `Obstacle ${index + 1}`,
+    x: clamp(cleanNumber(Number(value.x), settings.fieldLengthMeters / 2), 0, settings.fieldLengthMeters),
+    y: clamp(cleanNumber(Number(value.y), settings.fieldWidthMeters / 2), 0, settings.fieldWidthMeters),
+    length: clamp(safePositive(Number(value.length), 1), 0.05, settings.fieldLengthMeters),
+    width: clamp(safePositive(Number(value.width), 1), 0.05, settings.fieldWidthMeters),
+  };
+}
+
+function obstacleStyle(settings: Settings, size: FieldSize, obstacle: FieldObstacle): CSSProperties {
+  const center = pointToPixels(settings, size, obstacle);
+  const width = (obstacle.length / settings.fieldLengthMeters) * size.width;
+  const height = (obstacle.width / settings.fieldWidthMeters) * size.height;
+  return {
+    left: center.x - width / 2,
+    top: center.y - height / 2,
+    width,
+    height,
+  };
+}
+
+function plannerObstacleStyle(settings: Settings, size: FieldSize, obstacle: FieldObstacle): CSSProperties {
+  return obstacleStyle(settings, size, {
+    ...obstacle,
+    length: obstacle.length + settings.robotLengthMeters + 0.08,
+    width: obstacle.width + settings.robotWidthMeters + 0.08,
+  });
+}
+
+function obstacleContainsRobotCenter(point: MeterPoint, obstacle: FieldObstacle, settings: Settings): boolean {
+  const halfLength = obstacle.length / 2 + settings.robotLengthMeters / 2 + 0.04;
+  const halfWidth = obstacle.width / 2 + settings.robotWidthMeters / 2 + 0.04;
+  return Math.abs(point.x - obstacle.x) <= halfLength && Math.abs(point.y - obstacle.y) <= halfWidth;
+}
+
+function plannerPointIsClear(point: MeterPoint, obstacles: FieldObstacle[], settings: Settings): boolean {
+  const halfRobotLength = settings.robotLengthMeters / 2;
+  const halfRobotWidth = settings.robotWidthMeters / 2;
+  if (point.x < halfRobotLength || point.x > settings.fieldLengthMeters - halfRobotLength) return false;
+  if (point.y < halfRobotWidth || point.y > settings.fieldWidthMeters - halfRobotWidth) return false;
+  return !obstacles.some((obstacle) => obstacleContainsRobotCenter(point, obstacle, settings));
+}
+
+function plannerSegmentIsClear(start: MeterPoint, end: MeterPoint, obstacles: FieldObstacle[], settings: Settings, step = 0.08): boolean {
+  const distance = Math.hypot(end.x - start.x, end.y - start.y);
+  const sampleCount = Math.max(1, Math.ceil(distance / step));
+  for (let index = 0; index <= sampleCount; index += 1) {
+    const t = index / sampleCount;
+    if (!plannerPointIsClear({ x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t }, obstacles, settings)) return false;
+  }
+  return true;
+}
+
+class PlannerMinHeap<T> {
+  private values: Array<{ priority: number; value: T }> = [];
+
+  get size(): number { return this.values.length; }
+
+  push(value: T, priority: number): void {
+    this.values.push({ priority, value });
+    let index = this.values.length - 1;
+    while (index > 0) {
+      const parent = Math.floor((index - 1) / 2);
+      if (this.values[parent].priority <= priority) break;
+      this.values[index] = this.values[parent];
+      index = parent;
+    }
+    this.values[index] = { priority, value };
+  }
+
+  pop(): T | null {
+    const first = this.values[0];
+    const last = this.values.pop();
+    if (!first) return null;
+    if (last && this.values.length > 0) {
+      let index = 0;
+      while (true) {
+        const left = index * 2 + 1;
+        const right = left + 1;
+        if (left >= this.values.length) break;
+        const child = right < this.values.length && this.values[right].priority < this.values[left].priority ? right : left;
+        if (this.values[child].priority >= last.priority) break;
+        this.values[index] = this.values[child];
+        index = child;
+      }
+      this.values[index] = last;
+    }
+    return first.value;
+  }
+}
+
+function simplifyPlannerPath(points: MeterPoint[], obstacles: FieldObstacle[], settings: Settings): MeterPoint[] {
+  if (points.length <= 2) return points;
+  const simplified: MeterPoint[] = [points[0]];
+  let anchor = 0;
+  while (anchor < points.length - 1) {
+    let next = points.length - 1;
+    while (next > anchor + 1 && !plannerSegmentIsClear(points[anchor], points[next], obstacles, settings)) next -= 1;
+    simplified.push(points[next]);
+    anchor = next;
+  }
+  return simplified;
+}
+
+function roundPlannerCorners(points: MeterPoint[], obstacles: FieldObstacle[], settings: Settings): MeterPoint[] {
+  if (points.length <= 2) return points;
+  const amount = [0.34, 0.28, 0.21, 0.13, 0.06][settings.plannerSharpness];
+  const rounded: MeterPoint[] = [points[0]];
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const previous = points[index - 1];
+    const corner = points[index];
+    const next = points[index + 1];
+    const before = { x: corner.x + (previous.x - corner.x) * amount, y: corner.y + (previous.y - corner.y) * amount };
+    const after = { x: corner.x + (next.x - corner.x) * amount, y: corner.y + (next.y - corner.y) * amount };
+    if (plannerSegmentIsClear(rounded.at(-1) ?? previous, before, obstacles, settings)
+      && plannerSegmentIsClear(before, after, obstacles, settings)
+      && plannerSegmentIsClear(after, next, obstacles, settings)) {
+      rounded.push(before, after);
+    } else {
+      rounded.push(corner);
+    }
+  }
+  rounded.push(points.at(-1) as MeterPoint);
+  return rounded;
+}
+
+function removeCollinearPlannerPoints(points: MeterPoint[]): MeterPoint[] {
+  if (points.length <= 2) return points;
+  const reduced: MeterPoint[] = [points[0]];
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const previous = reduced.at(-1) as MeterPoint;
+    const current = points[index];
+    const next = points[index + 1];
+    const incoming = { x: current.x - previous.x, y: current.y - previous.y };
+    const outgoing = { x: next.x - current.x, y: next.y - current.y };
+    const incomingLength = Math.hypot(incoming.x, incoming.y);
+    const outgoingLength = Math.hypot(outgoing.x, outgoing.y);
+    if (incomingLength < 1e-8 || outgoingLength < 1e-8) continue;
+    const normalizedCross = Math.abs(incoming.x * outgoing.y - incoming.y * outgoing.x) / (incomingLength * outgoingLength);
+    const continuesForward = incoming.x * outgoing.x + incoming.y * outgoing.y >= 0;
+    if (normalizedCross <= 1e-5 && continuesForward) continue;
+    reduced.push(current);
+  }
+  reduced.push(points.at(-1) as MeterPoint);
+  return reduced;
+}
+
+function planCollisionFreePath(start: MeterPoint, end: MeterPoint, obstacles: FieldObstacle[], settings: Settings): MeterPoint[] | null {
+  if (!plannerPointIsClear(start, obstacles, settings) || !plannerPointIsClear(end, obstacles, settings)) return null;
+  if (plannerSegmentIsClear(start, end, obstacles, settings)) return [start, end];
+
+  const requestedCell = [0.42, 0.34, 0.27, 0.21, 0.16][settings.plannerWaypointDensity];
+  const columns = Math.max(3, Math.ceil(settings.fieldLengthMeters / requestedCell) + 1);
+  const rows = Math.max(3, Math.ceil(settings.fieldWidthMeters / requestedCell) + 1);
+  const cellX = settings.fieldLengthMeters / (columns - 1);
+  const cellY = settings.fieldWidthMeters / (rows - 1);
+  const toIndex = (column: number, row: number): number => row * columns + column;
+  const toPoint = (column: number, row: number): MeterPoint => ({ x: column * cellX, y: row * cellY });
+  const nearestCell = (point: MeterPoint): { column: number; row: number } => ({
+    column: clamp(Math.round(point.x / cellX), 0, columns - 1),
+    row: clamp(Math.round(point.y / cellY), 0, rows - 1),
+  });
+  const nearestClearCell = (point: MeterPoint): { column: number; row: number } | null => {
+    const center = nearestCell(point);
+    for (let radius = 0; radius <= Math.max(columns, rows); radius += 1) {
+      const candidates: Array<{ column: number; row: number }> = [];
+      for (let rowOffset = -radius; rowOffset <= radius; rowOffset += 1) {
+        for (let columnOffset = -radius; columnOffset <= radius; columnOffset += 1) {
+          if (Math.max(Math.abs(columnOffset), Math.abs(rowOffset)) !== radius) continue;
+          const column = center.column + columnOffset;
+          const row = center.row + rowOffset;
+          if (column < 0 || column >= columns || row < 0 || row >= rows) continue;
+          candidates.push({ column, row });
+        }
+      }
+      candidates.sort((left, right) => {
+        const leftPoint = toPoint(left.column, left.row);
+        const rightPoint = toPoint(right.column, right.row);
+        return Math.hypot(leftPoint.x - point.x, leftPoint.y - point.y) - Math.hypot(rightPoint.x - point.x, rightPoint.y - point.y);
+      });
+      const match = candidates.find((candidate) => {
+        const candidatePoint = toPoint(candidate.column, candidate.row);
+        return plannerPointIsClear(candidatePoint, obstacles, settings) && plannerSegmentIsClear(point, candidatePoint, obstacles, settings);
+      });
+      if (match) return match;
+    }
+    return null;
+  };
+  const startCell = nearestClearCell(start);
+  const endCell = nearestClearCell(end);
+  if (!startCell || !endCell) return null;
+  const startIndex = toIndex(startCell.column, startCell.row);
+  const endIndex = toIndex(endCell.column, endCell.row);
+  const g = new Float64Array(columns * rows);
+  g.fill(Number.POSITIVE_INFINITY);
+  g[startIndex] = 0;
+  const parents = new Int32Array(columns * rows);
+  parents.fill(-1);
+  const closed = new Uint8Array(columns * rows);
+  const open = new PlannerMinHeap<number>();
+  open.push(startIndex, Math.hypot(end.x - start.x, end.y - start.y));
+  const directions = [
+    { x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 },
+    { x: 1, y: 1 }, { x: 1, y: -1 }, { x: -1, y: 1 }, { x: -1, y: -1 },
+  ];
+  const turnPenalty = [1.4, 0.9, 0.52, 0.2, 0.04][settings.plannerSharpness];
+
+  while (open.size > 0) {
+    const currentIndex = open.pop();
+    if (currentIndex === null || closed[currentIndex]) continue;
+    if (currentIndex === endIndex) break;
+    closed[currentIndex] = 1;
+    const column = currentIndex % columns;
+    const row = Math.floor(currentIndex / columns);
+    const currentPoint = toPoint(column, row);
+    const parentIndex = parents[currentIndex];
+    const parentColumn = parentIndex >= 0 ? parentIndex % columns : column;
+    const parentRow = parentIndex >= 0 ? Math.floor(parentIndex / columns) : row;
+
+    for (const direction of directions) {
+      const nextColumn = column + direction.x;
+      const nextRow = row + direction.y;
+      if (nextColumn < 0 || nextColumn >= columns || nextRow < 0 || nextRow >= rows) continue;
+      const nextIndex = toIndex(nextColumn, nextRow);
+      if (closed[nextIndex]) continue;
+      const nextPoint = toPoint(nextColumn, nextRow);
+      if (!plannerSegmentIsClear(currentPoint, nextPoint, obstacles, settings, Math.min(cellX, cellY) / 2)) continue;
+      const previousDirection = { x: column - parentColumn, y: row - parentRow };
+      const changedDirection = parentIndex >= 0 && (previousDirection.x !== direction.x || previousDirection.y !== direction.y);
+      const movementCost = Math.hypot(direction.x * cellX, direction.y * cellY) + (changedDirection ? turnPenalty : 0);
+      const nextCost = g[currentIndex] + movementCost;
+      if (nextCost >= g[nextIndex]) continue;
+      g[nextIndex] = nextCost;
+      parents[nextIndex] = currentIndex;
+      const heuristic = Math.hypot(end.x - nextPoint.x, end.y - nextPoint.y);
+      open.push(nextIndex, nextCost + heuristic);
+    }
+  }
+
+  if (!Number.isFinite(g[endIndex])) return null;
+  const gridPath: MeterPoint[] = [];
+  let cursor = endIndex;
+  while (cursor >= 0) {
+    gridPath.push(toPoint(cursor % columns, Math.floor(cursor / columns)));
+    if (cursor === startIndex) break;
+    cursor = parents[cursor];
+  }
+  if (cursor !== startIndex) return null;
+  gridPath.reverse();
+  gridPath[0] = start;
+  gridPath[gridPath.length - 1] = end;
+  return removeCollinearPlannerPoints(
+    roundPlannerCorners(simplifyPlannerPath(gridPath, obstacles, settings), obstacles, settings),
+  );
 }
 
 function maxPathPosition(path: SharedPathData): number {
@@ -1423,13 +1952,18 @@ function robotRenderStyle(settings: Settings, size: FieldSize, x: number, y: num
 
 function handoffCircleStyle(settings: Settings, size: FieldSize, waypoint: Waypoint): CSSProperties {
   const center = pointToPixels(settings, size, waypoint);
-  const diameter = Math.max(8, waypoint.handoff * 2 * (size.width / settings.fieldLengthMeters));
+  const pixelsPerMeter = Math.max(0, Math.min(
+    size.width / safePositive(settings.fieldLengthMeters, DEFAULT_SETTINGS.fieldLengthMeters),
+    size.height / safePositive(settings.fieldWidthMeters, DEFAULT_SETTINGS.fieldWidthMeters),
+  ));
+  const diameter = Math.max(8, waypoint.handoff * 2 * pixelsPerMeter);
   return {
     width: `${diameter}px`,
     height: `${diameter}px`,
     left: `${center.x - diameter / 2}px`,
     top: `${center.y - diameter / 2}px`,
-  };
+    "--handoff-label-offset": `${Math.max(settings.robotLengthMeters, settings.robotWidthMeters) * pixelsPerMeter * 0.5 + 12}px`,
+  } as CSSProperties;
 }
 
 function serializePathData(path: SharedPathData, settings: Settings): SerializedPathFile {
@@ -1451,10 +1985,13 @@ function serializePathData(path: SharedPathData, settings: Settings): Serialized
       angle: normalizeCompassDegrees(target.angle),
       position: target.position,
     })),
-    events: path.events.map((event) => ({
-      name: event.name,
-      position: event.position,
-    })),
+    events: [
+      ...path.events.map((event) => ({ name: event.name, position: event.position })),
+      ...path.eventZones.flatMap((zone) => [
+        { name: zone.startName, position: Math.min(zone.startPosition, zone.endPosition) },
+        { name: zone.endName, position: Math.max(zone.startPosition, zone.endPosition) },
+      ]),
+    ],
     constraint_zones: path.constraintZones.map((zone) => ({
       max_translational_velocity: zone.maxTranslationalVelocity,
       max_translational_acceleration: zone.maxTranslationalAcceleration,
@@ -1539,42 +2076,86 @@ function serializeAutoConfig(nodes: PathTreeNode[]): SerializedAutoConfig {
 
 function normalizePersistedState(value: PersistedAppState | null): PersistedAppState | null {
   if (!value || typeof value !== "object") return null;
-  return {
-    settings: {
+  const normalizePath = (path: Partial<SharedPathData> | null | undefined): SharedPathData => ({
+    waypoints: Array.isArray(path?.waypoints) ? path.waypoints : [],
+    rotationTargets: Array.isArray(path?.rotationTargets) ? path.rotationTargets : [],
+    events: Array.isArray(path?.events) ? path.events : [],
+    eventZones: Array.isArray(path?.eventZones) ? path.eventZones : [],
+    constraintZones: Array.isArray(path?.constraintZones) ? path.constraintZones : [],
+  });
+  const pathDataByName = value.pathDataByName && typeof value.pathDataByName === "object"
+    ? Object.fromEntries(Object.entries(value.pathDataByName).map(([name, path]) => [name, normalizePath(path)]))
+    : {};
+  const normalizedSettings: Settings = {
       ...DEFAULT_SETTINGS,
       ...value.settings,
       customTheme: { ...DEFAULT_SETTINGS.customTheme, ...value.settings?.customTheme },
-    },
+      plannerWaypointDensity: normalizePlannerLevel(value.settings?.plannerWaypointDensity),
+      plannerSharpness: normalizePlannerLevel(value.settings?.plannerSharpness),
+      designPreset: DESIGN_PRESETS.some((preset) => preset.id === value.settings?.designPreset)
+        ? value.settings.designPreset
+        : DEFAULT_DESIGN.id,
+      showObstacleZones: typeof value.settings?.showObstacleZones === "boolean"
+        ? value.settings.showObstacleZones
+        : DEFAULT_SETTINGS.showObstacleZones,
+    };
+  return {
+    settings: normalizedSettings,
     treeNodes: Array.isArray(value.treeNodes) ? value.treeNodes : [],
-    pathDataByName: value.pathDataByName && typeof value.pathDataByName === "object" ? value.pathDataByName : {},
+    pathDataByName,
+    knownPathFileNames: Array.isArray(value.knownPathFileNames) ? value.knownPathFileNames.filter((name): name is string => typeof name === "string") : [],
     activePathNodeId: value.activePathNodeId ?? null,
     pan: value.pan ?? { x: 0, y: 0 },
+    obstacles: Array.isArray(value.obstacles) ? value.obstacles.map((obstacle, index) => normalizeObstacle(obstacle, index, normalizedSettings)) : [],
+    activityLog: Array.isArray(value.activityLog) ? value.activityLog.filter((entry) => entry && typeof entry.id === "string" && typeof entry.message === "string" && Number.isFinite(entry.timestamp)) : [],
+    selectedTreeNodeId: typeof value.selectedTreeNodeId === "string" ? value.selectedTreeNodeId : null,
+    treeModalRect: value.treeModalRect ?? { x: 420, y: 18, width: 520, height: 520 },
+    treeModalMinimized: Boolean(value.treeModalMinimized),
+    playbackModalPosition: value.playbackModalPosition ?? { x: 28, y: 84 },
+    versionHistory: Array.isArray(value.versionHistory) ? value.versionHistory.map((snapshot) => ({
+      ...snapshot,
+      treeNodes: Array.isArray(snapshot.treeNodes) ? snapshot.treeNodes : [],
+      pathDataByName: Object.fromEntries(Object.entries(snapshot.pathDataByName ?? {}).map(([name, path]) => [name, normalizePath(path)])),
+      activePathNodeId: snapshot.activePathNodeId ?? null,
+      obstacles: Array.isArray(snapshot.obstacles) ? snapshot.obstacles.map((obstacle, index) => normalizeObstacle(obstacle, index, normalizedSettings)) : [],
+    })) : [],
   };
 }
 
-function useElementSize<T extends HTMLElement>(): [RefObject<T | null>, FieldSize] {
+function useElementSize<T extends HTMLElement>(observeKey: unknown = true): [RefObject<T | null>, FieldSize] {
   const ref = useRef<T | null>(null);
   const [size, setSize] = useState<FieldSize>({ width: 0, height: 0 });
 
   useEffect(() => {
-    const element = ref.current;
-    if (!element) return;
-
-    const update = (): void => {
-      setSize({ width: element.clientWidth, height: element.clientHeight });
-    };
-
-    update();
-
-    if (!globalThis.ResizeObserver) {
-      globalThis.addEventListener("resize", update);
-      return () => globalThis.removeEventListener("resize", update);
+    if (observeKey === false) {
+      setSize({ width: 0, height: 0 });
+      return;
     }
-
-    const observer = new ResizeObserver(update);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
+    let animationFrame: number | null = null;
+    let observer: ResizeObserver | null = null;
+    let update: (() => void) | null = null;
+    const attach = (): void => {
+      const element = ref.current;
+      if (!element) {
+        animationFrame = globalThis.requestAnimationFrame(attach);
+        return;
+      }
+      update = () => setSize({ width: element.clientWidth, height: element.clientHeight });
+      update();
+      if (globalThis.ResizeObserver) {
+        observer = new ResizeObserver(update);
+        observer.observe(element);
+      } else {
+        globalThis.addEventListener("resize", update);
+      }
+    };
+    attach();
+    return () => {
+      if (animationFrame !== null) globalThis.cancelAnimationFrame(animationFrame);
+      observer?.disconnect();
+      if (update && !globalThis.ResizeObserver) globalThis.removeEventListener("resize", update);
+    };
+  }, [observeKey]);
 
   return [ref, size];
 }
@@ -1591,11 +2172,26 @@ function LayoutGlyph({ mode }: { mode: LayoutMode }): ReactElement {
 
 const EDITOR_HISTORY_LIMIT = 100;
 const EDITOR_HISTORY_COMMIT_DELAY_MS = 250;
+const VERSION_HISTORY_LIMIT = 80;
 
 function editorSnapshotsMatch(left: EditorSnapshot, right: EditorSnapshot): boolean {
   return left.treeNodes === right.treeNodes
     && left.pathDataByName === right.pathDataByName
     && left.activePathNodeId === right.activePathNodeId;
+}
+
+function copyEditorSnapshot(snapshot: EditorSnapshot): EditorSnapshot {
+  return {
+    treeNodes: snapshot.treeNodes.map((node) => ({ ...node })),
+    pathDataByName: Object.fromEntries(Object.entries(snapshot.pathDataByName).map(([name, path]) => [name, {
+      waypoints: path.waypoints.map((waypoint) => ({ ...waypoint })),
+      rotationTargets: path.rotationTargets.map((target) => ({ ...target })),
+      events: path.events.map((event) => ({ ...event })),
+      eventZones: path.eventZones.map((zone) => ({ ...zone })),
+      constraintZones: path.constraintZones.map((zone) => ({ ...zone })),
+    }])),
+    activePathNodeId: snapshot.activePathNodeId,
+  };
 }
 
 function isTextEditingTarget(target: EventTarget | null): boolean {
@@ -1618,8 +2214,10 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const [addElementKind, setAddElementKind] = useState<AddElementKind>("waypoint");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
-  const [saveMenuOpen, setSaveMenuOpen] = useState(false);
+  const [preferencesTab, setPreferencesTab] = useState<PreferencesTab>("themes");
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [treeAddMenuOpen, setTreeAddMenuOpen] = useState(false);
+  const [moreToolsOpen, setMoreToolsOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [pendingConnection, setPendingConnection] = useState<PendingTreeConnection | null>(null);
   const [modal, setModal] = useState<ElementModalState>(null);
@@ -1630,6 +2228,15 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const [saveStatus, setSaveStatusState] = useState<SaveStatus>({ kind: "idle", message: "" });
   const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([]);
   const [activityLogOpen, setActivityLogOpen] = useState(false);
+  const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
+  const [versionHistory, setVersionHistory] = useState<VersionHistorySnapshot[]>([]);
+  const [obstaclesOpen, setObstaclesOpen] = useState(false);
+  const [obstacleFieldRef, obstacleFieldSize] = useElementSize<HTMLDivElement>(obstaclesOpen);
+  const [obstacles, setObstacles] = useState<FieldObstacle[]>([]);
+  const [selectedObstacleId, setSelectedObstacleId] = useState<string | null>(null);
+  const [pathPlannerActive, setPathPlannerActive] = useState(false);
+  const [pathPlannerPoints, setPathPlannerPoints] = useState<MeterPoint[]>([]);
+  const [pathPlannerStartWaypointId, setPathPlannerStartWaypointId] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [pan, setPan] = useState<PixelPoint>({ x: 0, y: 0 });
   const [treeModalRect, setTreeModalRect] = useState<TreeModalRect>({ x: 420, y: 18, width: 520, height: 520 });
@@ -1643,6 +2250,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const [nt4AddressDraft, setNt4AddressDraft] = useState(nt4Address);
   const persistTimerRef = useRef<number | null>(null);
   const autoSaveTimerRef = useRef<number | null>(null);
+  const metadataAutoSaveTimerRef = useRef<number | null>(null);
   const historyCommitTimerRef = useRef<number | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const elementModalRef = useRef<HTMLDivElement>(null);
@@ -1652,6 +2260,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const playbackTimeLabelRef = useRef<HTMLSpanElement>(null);
   const focusTreeModalRef = useRef<HTMLElement>(null);
   const editorHistoryRef = useRef<EditorHistory | null>(null);
+  const versionHistoryRef = useRef<VersionHistorySnapshot[]>([]);
   const editorSnapshotRef = useRef<EditorSnapshot>({ treeNodes, pathDataByName, activePathNodeId });
   const applyingHistoryRef = useRef(false);
   const [, setHistoryRevision] = useState(0);
@@ -1660,6 +2269,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const treeClipboardRef = useRef<TreeClipboardSnapshot | null>(null);
   const clipboardPasteCountRef = useRef(0);
   const previousLivePoseRef = useRef<{ pose: Pose2d; timestamp: number } | null>(null);
+  const wasRobotConnectedRef = useRef(false);
   const draggingModalRef = useRef<{ offsetX: number; offsetY: number } | null>(null);
   const dragOperationRef = useRef<(() => void) | null>(null);
   const [connected] = useEntry<boolean>("/AdvantageKit/DriverStation/DSAttached", false);
@@ -1668,6 +2278,8 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     new Uint8Array([...new Array(24).fill(0)]),
   );
   const [, setSelectedAutoEntry] = useEntry<string>("/Voyager/SelectedAuto", "");
+
+  versionHistoryRef.current = versionHistory;
 
   const setSaveStatus = useCallback((status: SaveStatus): void => {
     setSaveStatusState(status);
@@ -1748,6 +2360,10 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     if (settings.themePreset === "custom") return settings.customTheme;
     return THEME_PRESETS.find((preset) => preset.id === settings.themePreset)?.palette ?? DEFAULT_THEME.palette;
   }, [settings.customTheme, settings.themePreset]);
+  const activeDesign = useMemo<DesignPreset>(
+    () => DESIGN_PRESETS.find((preset) => preset.id === settings.designPreset) ?? DEFAULT_DESIGN,
+    [settings.designPreset],
+  );
   const appThemeStyle = useMemo<CSSProperties>(() => ({
     "--bg": activeTheme.background,
     "--panel": activeTheme.panel,
@@ -1777,7 +2393,19 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     "--destructive": activeTheme.danger,
     "--input": activeTheme.border,
     "--ring": activeTheme.accent2,
-  } as CSSProperties), [activeTheme]);
+    "--design-font-body": activeDesign.bodyFont,
+    "--design-font-display": activeDesign.displayFont,
+    "--design-font-mono": activeDesign.monoFont,
+    "--design-base-font-size": activeDesign.baseFontSize,
+    "--design-nav-height": activeDesign.navHeight,
+    "--design-control-height": activeDesign.controlHeight,
+    "--design-panel-padding": activeDesign.panelPadding,
+    "--design-radius-sm": activeDesign.radiusSmall,
+    "--design-radius-md": activeDesign.radiusMedium,
+    "--design-radius-lg": activeDesign.radiusLarge,
+    "--design-button-radius": activeDesign.buttonRadius,
+    "--design-shadow": activeDesign.shadow,
+  } as CSSProperties), [activeDesign, activeTheme]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -1943,6 +2571,12 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     setSaveStatus({ kind: "idle", message });
   }, []);
 
+  const restoreVersionSnapshot = useCallback((snapshot: VersionHistorySnapshot): void => {
+    applyEditorSnapshot(copyEditorSnapshot(snapshot), `Restored ${snapshot.source === "auto" ? "auto-save" : "manual"} snapshot from ${new Date(snapshot.timestamp).toLocaleString()}.`);
+    setObstacles((snapshot.obstacles ?? []).map((obstacle) => ({ ...obstacle })));
+    setVersionHistoryOpen(false);
+  }, [applyEditorSnapshot]);
+
   const undo = useCallback((): void => {
     if (historyCommitTimerRef.current) {
       window.clearTimeout(historyCommitTimerRef.current);
@@ -2042,6 +2676,13 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
           setKnownPathFileNames(Array.isArray(stored.knownPathFileNames) ? stored.knownPathFileNames.filter((name): name is string => typeof name === "string") : []);
           setActivePathNodeId(stored.activePathNodeId);
           setPan(stored.pan);
+          setVersionHistory(stored.versionHistory ?? []);
+          setObstacles(stored.obstacles ?? []);
+          setActivityLog(stored.activityLog ?? []);
+          setSelectedTreeNodeId(stored.selectedTreeNodeId ?? null);
+          if (stored.treeModalRect) setTreeModalRect(stored.treeModalRect);
+          setTreeModalMinimized(Boolean(stored.treeModalMinimized));
+          if (stored.playbackModalPosition) setPlaybackModalPosition(stored.playbackModalPosition);
         }
       } catch (error) {
         console.error(error);
@@ -2061,17 +2702,47 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     if (!hydrated) return;
     if (persistTimerRef.current) window.clearTimeout(persistTimerRef.current);
     persistTimerRef.current = window.setTimeout(() => {
-      const state: PersistedAppState = { settings, treeNodes, pathDataByName, knownPathFileNames, activePathNodeId, pan };
+      const state: PersistedAppState = {
+        settings,
+        treeNodes,
+        pathDataByName,
+        knownPathFileNames,
+        activePathNodeId,
+        pan,
+        versionHistory,
+        obstacles,
+        activityLog,
+        selectedTreeNodeId,
+        treeModalRect,
+        treeModalMinimized,
+        playbackModalPosition,
+      };
       void idbSet(APP_STATE_KEY, state).catch((error) => {
         console.error(error);
         setSaveStatus({ kind: "error", message: "Could not save local IndexedDB state." });
       });
     }, 250);
-  }, [activePathNodeId, hydrated, knownPathFileNames, pan, pathDataByName, settings, treeNodes]);
+  }, [activePathNodeId, activityLog, hydrated, knownPathFileNames, obstacles, pan, pathDataByName, playbackModalPosition, selectedTreeNodeId, settings, treeModalMinimized, treeModalRect, treeNodes, versionHistory]);
 
   const updateSettings = useCallback((patch: Partial<Settings>): void => {
     setSettings((previous) => ({ ...previous, ...patch }));
   }, []);
+
+  const recordVersionSnapshot = useCallback((source: VersionHistorySnapshot["source"], state?: EditorSnapshot): VersionHistorySnapshot[] => {
+    const snapshot = copyEditorSnapshot(state ?? { treeNodes, pathDataByName, activePathNodeId });
+    const history = versionHistoryRef.current;
+    const latest = history.at(-1);
+    const sameAsLatest = latest
+      && JSON.stringify(latest.treeNodes) === JSON.stringify(snapshot.treeNodes)
+      && JSON.stringify(latest.pathDataByName) === JSON.stringify(snapshot.pathDataByName)
+      && latest.activePathNodeId === snapshot.activePathNodeId
+      && JSON.stringify(latest.obstacles ?? []) === JSON.stringify(obstacles);
+    if (sameAsLatest) return history;
+    const nextHistory = [...history, { ...snapshot, obstacles: obstacles.map((obstacle) => ({ ...obstacle })), id: createId("version"), timestamp: Date.now(), source } as VersionHistorySnapshot].slice(-VERSION_HISTORY_LIMIT);
+    versionHistoryRef.current = nextHistory;
+    setVersionHistory(nextHistory);
+    return nextHistory;
+  }, [activePathNodeId, obstacles, pathDataByName, treeNodes]);
 
   const updateActivePathData = useCallback(
     (updater: (current: SharedPathData) => SharedPathData): void => {
@@ -2089,8 +2760,8 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   );
 
   const closeMenus = useCallback((): void => {
-    setSaveMenuOpen(false);
     setTreeAddMenuOpen(false);
+    setMoreToolsOpen(false);
     setContextMenu(null);
   }, []);
 
@@ -2246,6 +2917,8 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
         || settingsOpen
         || preferencesOpen
         || activityLogOpen
+        || versionHistoryOpen
+        || obstaclesOpen
         || !selectedTreeNodeId
       ) return;
       const selectedNode = treeNodes.find((node) => node.id === selectedTreeNodeId);
@@ -2256,7 +2929,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     };
     window.addEventListener("keydown", onDeleteSelectedNode);
     return () => window.removeEventListener("keydown", onDeleteSelectedNode);
-  }, [activityLogOpen, deleteNode, preferencesOpen, selectedTreeNodeId, settingsOpen, treeNodes]);
+  }, [activityLogOpen, deleteNode, obstaclesOpen, preferencesOpen, selectedTreeNodeId, settingsOpen, treeNodes, versionHistoryOpen]);
 
   const startRename = useCallback((node: PathTreeNode): void => {
     setRenamingNodeId(node.id);
@@ -2511,6 +3184,9 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       if (addElementKind === "eventTrigger") {
         return { ...current, events: [...current.events, createDefaultEventTrigger(currentMaxPosition)] };
       }
+      if (addElementKind === "eventZone") {
+        return { ...current, eventZones: [...current.eventZones, createDefaultEventZone(currentMaxPosition)] };
+      }
       return { ...current, constraintZones: [...current.constraintZones, createDefaultConstraintZone(currentMaxPosition, settings)] };
     });
   }, [activePathName, addElementKind, settings, setError, updateActivePathData]);
@@ -2533,6 +3209,25 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     updateActivePathData((current) => ({
       ...current,
       events: current.events.map((event) => (event.id === id ? { ...event, ...patch } : event)),
+    }));
+  }, [updateActivePathData]);
+
+  const updateEventZone = useCallback((id: string, patch: Partial<EventZone>): void => {
+    updateActivePathData((current) => ({
+      ...current,
+      eventZones: current.eventZones.map((zone) => {
+        if (zone.id !== id) return zone;
+        const updated = { ...zone, ...patch };
+        const maxPositionValue = maxPathPosition(current);
+        updated.startPosition = clamp(updated.startPosition, 0, maxPositionValue);
+        updated.endPosition = clamp(updated.endPosition, 0, maxPositionValue);
+        if (updated.startPosition > updated.endPosition) {
+          const temporary = updated.startPosition;
+          updated.startPosition = updated.endPosition;
+          updated.endPosition = temporary;
+        }
+        return updated;
+      }),
     }));
   }, [updateActivePathData]);
 
@@ -2569,6 +3264,13 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
         events: waypoints.length >= 2
           ? current.events.map((event) => ({ ...event, position: clamp(event.position, 0, nextMaxPosition) }))
           : [],
+        eventZones: waypoints.length >= 2
+          ? current.eventZones.map((zone) => ({
+              ...zone,
+              startPosition: clamp(zone.startPosition, 0, nextMaxPosition),
+              endPosition: clamp(zone.endPosition, 0, nextMaxPosition),
+            }))
+          : [],
         constraintZones: waypoints.length >= 2
           ? current.constraintZones.map((zone) => ({
               ...zone,
@@ -2596,6 +3298,32 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     }));
     setModal((current) => (current?.kind === "eventTrigger" && current.id === id ? null : current));
   }, [updateActivePathData]);
+
+  const deleteEventZone = useCallback((id: string): void => {
+    updateActivePathData((current) => ({
+      ...current,
+      eventZones: current.eventZones.filter((zone) => zone.id !== id),
+    }));
+    setModal((current) => (current?.kind === "eventZone" && current.id === id ? null : current));
+  }, [updateActivePathData]);
+
+  const mirrorActivePath = useCallback((axis: "x" | "y"): void => {
+    if (!activePathName) {
+      setError("Select a path block before mirroring it.");
+      return;
+    }
+    updateActivePathData((current) => ({
+      ...current,
+      waypoints: current.waypoints.map((waypoint) => axis === "x"
+        ? { ...waypoint, x: settings.fieldLengthMeters - waypoint.x, angle: normalizeCompassDegrees(180 - waypoint.angle) }
+        : { ...waypoint, y: settings.fieldWidthMeters - waypoint.y, angle: normalizeCompassDegrees(-waypoint.angle) }),
+      rotationTargets: current.rotationTargets.map((target) => ({
+        ...target,
+        angle: normalizeCompassDegrees(axis === "x" ? 180 - target.angle : -target.angle),
+      })),
+    }));
+    setSaveStatus({ kind: "saved", message: `Mirrored ${activePathName} across the ${axis.toUpperCase()} coordinate axis.` });
+  }, [activePathName, setError, setSaveStatus, settings.fieldLengthMeters, settings.fieldWidthMeters, updateActivePathData]);
 
   const deleteConstraintZone = useCallback((id: string): void => {
     updateActivePathData((current) => ({
@@ -3128,7 +3856,25 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
 
     try {
       const folder = await window.electronAPI.pickDirectory();
-      if (folder) updateSettings({ robotCodeProjectFolder: folder });
+      if (!folder) return;
+      updateSettings({ robotCodeProjectFolder: folder });
+      const metadataText = await window.electronAPI.readTextFile(getVoyagerAssetsFolder(folder), PROJECT_METADATA_FILE);
+      if (metadataText) {
+        const metadata = normalizePersistedState(JSON.parse(metadataText) as PersistedAppState);
+        if (metadata) {
+          setVersionHistory((current) => {
+            const merged = [...current, ...(metadata.versionHistory ?? [])]
+              .filter((snapshot, index, all) => all.findIndex((candidate) => candidate.id === snapshot.id) === index)
+              .sort((left, right) => left.timestamp - right.timestamp)
+              .slice(-VERSION_HISTORY_LIMIT);
+            versionHistoryRef.current = merged;
+            return merged;
+          });
+          setSaveStatus({ kind: "saved", message: `Selected robot project and found ${(metadata.versionHistory ?? []).length} project snapshot${(metadata.versionHistory ?? []).length === 1 ? "" : "s"}.` });
+          return;
+        }
+      }
+      setSaveStatus({ kind: "saved", message: "Selected robot project. Project metadata will be created on the next save." });
     } catch (error) {
       console.error(error);
       setError("Could not select a robot code project folder.");
@@ -3142,6 +3888,65 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     if (window.electronAPI.makeDirectory) await window.electronAPI.makeDirectory(folder);
     await window.electronAPI.writeTextFile(folder, fileName, text);
   }, [settings.robotCodeProjectFolder]);
+
+  const writeProjectMetadata = useCallback(async (overrides: Partial<PersistedAppState> = {}): Promise<void> => {
+    if (!settings.robotCodeProjectFolder) throw new Error("Select a robot code project before saving metadata.");
+    if (!window.electronAPI) throw new Error("Electron preload API is unavailable.");
+    const folder = getVoyagerAssetsFolder(settings.robotCodeProjectFolder);
+    if (window.electronAPI.makeDirectory) await window.electronAPI.makeDirectory(folder);
+    const metadata: ProjectMetadataFile = {
+      schemaVersion: 1,
+      voyagerVersion: VOYAGER_VERSION,
+      savedAt: Date.now(),
+      settings,
+      treeNodes,
+      pathDataByName,
+      knownPathFileNames,
+      activePathNodeId,
+      pan,
+      versionHistory: versionHistoryRef.current,
+      obstacles,
+      activityLog,
+      selectedTreeNodeId,
+      treeModalRect,
+      treeModalMinimized,
+      playbackModalPosition,
+      ...overrides,
+    };
+    await window.electronAPI.writeTextFile(folder, PROJECT_METADATA_FILE, `${JSON.stringify(metadata, null, 2)}\n`);
+  }, [activePathNodeId, activityLog, knownPathFileNames, obstacles, pan, pathDataByName, playbackModalPosition, selectedTreeNodeId, settings, treeModalMinimized, treeModalRect, treeNodes]);
+
+  const importProjectMetadata = useCallback(async (): Promise<void> => {
+    if (!settings.robotCodeProjectFolder || !window.electronAPI) {
+      setError("Select a robot code project before loading project metadata.");
+      return;
+    }
+    try {
+      const text = await window.electronAPI.readTextFile(getVoyagerAssetsFolder(settings.robotCodeProjectFolder), PROJECT_METADATA_FILE);
+      if (!text) throw new Error("No voyager/assets/metadata.json file exists in this project yet.");
+      const projectState = normalizePersistedState(JSON.parse(text) as PersistedAppState);
+      if (!projectState) throw new Error("The project metadata file is not valid Voyager metadata.");
+      const selectedFolder = settings.robotCodeProjectFolder;
+      setSettings({ ...projectState.settings, robotCodeProjectFolder: selectedFolder });
+      setTreeNodes(projectState.treeNodes);
+      setPathDataByName(projectState.pathDataByName);
+      setKnownPathFileNames(projectState.knownPathFileNames ?? []);
+      setActivePathNodeId(projectState.activePathNodeId);
+      setPan(projectState.pan);
+      setObstacles(projectState.obstacles ?? []);
+      setActivityLog(projectState.activityLog ?? []);
+      setSelectedTreeNodeId(projectState.selectedTreeNodeId ?? null);
+      if (projectState.treeModalRect) setTreeModalRect(projectState.treeModalRect);
+      setTreeModalMinimized(Boolean(projectState.treeModalMinimized));
+      if (projectState.playbackModalPosition) setPlaybackModalPosition(projectState.playbackModalPosition);
+      setVersionHistory(projectState.versionHistory ?? []);
+      versionHistoryRef.current = projectState.versionHistory ?? [];
+      setVersionHistoryOpen(false);
+      setSaveStatus({ kind: "saved", message: "Loaded the complete Voyager workspace from project metadata." });
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not load project metadata.");
+    }
+  }, [setError, settings.robotCodeProjectFolder]);
 
   const deleteTextFile = useCallback(async (fileName: string): Promise<void> => {
     if (!settings.robotCodeProjectFolder) throw new Error("Select a robot code project before deleting old path files.");
@@ -3163,6 +3968,13 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     setSaveStatus({ kind: "saved", message: `Published routine ${selectedRoutineCode} to /Voyager/SelectedAuto.` });
   }, [connected, livePose.rotation, livePose.x, livePose.y, selectedRoutineCode, setError, setSelectedAutoEntry]);
 
+  useEffect(() => {
+    if (!hydrated) return;
+    const justConnected = connected && !wasRobotConnectedRef.current;
+    wasRobotConnectedRef.current = connected;
+    if (justConnected && settings.autoPublishOnConnect && selectedRoutineCode) publishSelectedRoutine();
+  }, [connected, hydrated, publishSelectedRoutine, selectedRoutineCode, settings.autoPublishOnConnect]);
+
   const savePathByName = useCallback(async (pathName: string): Promise<void> => {
     const data = pathDataByName[pathName] ?? createEmptyPathData();
     await writeTextFile(`${sanitizeFileName(pathName)}.json`, `${JSON.stringify(serializePathData(data, settings), null, 2)}\n`);
@@ -3181,14 +3993,17 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     try {
       setSaveStatus({ kind: "saving", message: `Saving ${activePathName}...` });
       await savePathByName(activePathName);
+      const nextHistory = recordVersionSnapshot("manual");
+      const nextKnownPaths = knownPathFileNames.includes(activePathName) ? knownPathFileNames : [...knownPathFileNames, activePathName];
+      await writeProjectMetadata({ versionHistory: nextHistory, knownPathFileNames: nextKnownPaths });
       setSaveStatus({ kind: "saved", message: `Saved ${activePathName}.` });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not save the current path.";
       setSaveStatus({ kind: "error", message });
     }
-  }, [activePathName, savePathByName, setError]);
+  }, [activePathName, knownPathFileNames, recordVersionSnapshot, savePathByName, setError, writeProjectMetadata]);
 
-  const saveAll = useCallback(async (): Promise<void> => {
+  const saveAll = useCallback(async (snapshotSource: VersionHistorySnapshot["source"] = "manual"): Promise<void> => {
     try {
       setSaveStatus({ kind: "saving", message: "Saving all Voyager files..." });
       const pathNamesFromNodes = Array.from(new Set(treeNodes.filter((node): node is PathTreePathNode => node.kind === "path").map((node) => node.name)));
@@ -3199,8 +4014,23 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       for (const pathName of pathNamesFromNodes) await savePathByName(pathName);
       await writeTextFile("auto_config.json", `${JSON.stringify(serializeAutoConfig(treeNodes), null, 2)}\n`);
 
-      setPathDataByName((current) => Object.fromEntries(Object.entries(current).filter(([pathName]) => pathNameSet.has(pathName))));
-      setKnownPathFileNames(pathNamesFromNodes);
+      const savedPathDataByName = Object.fromEntries(Object.entries(pathDataByName).filter(([pathName]) => pathNameSet.has(pathName)));
+      setPathDataByName((current) => {
+        const currentNames = Object.keys(current);
+        const nextNames = Object.keys(savedPathDataByName);
+        return currentNames.length === nextNames.length && nextNames.every((name) => current[name] === savedPathDataByName[name])
+          ? current
+          : savedPathDataByName;
+      });
+      setKnownPathFileNames((current) => current.length === pathNamesFromNodes.length && current.every((name, index) => name === pathNamesFromNodes[index])
+        ? current
+        : pathNamesFromNodes);
+      const nextHistory = recordVersionSnapshot(snapshotSource, { treeNodes, pathDataByName: savedPathDataByName, activePathNodeId });
+      await writeProjectMetadata({
+        pathDataByName: savedPathDataByName,
+        knownPathFileNames: pathNamesFromNodes,
+        versionHistory: nextHistory,
+      });
       setSaveStatus({
         kind: "saved",
         message: stalePathNames.length > 0
@@ -3211,24 +4041,292 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       const message = error instanceof Error ? error.message : "Could not save Voyager files.";
       setSaveStatus({ kind: "error", message });
     }
-  }, [deletePathFileByName, knownPathFileNames, pathDataByName, savePathByName, treeNodes, writeTextFile]);
+  }, [activePathNodeId, deletePathFileByName, knownPathFileNames, pathDataByName, recordVersionSnapshot, savePathByName, treeNodes, writeProjectMetadata, writeTextFile]);
+
+  const saveMetadataNow = useCallback(async (): Promise<void> => {
+    try {
+      setSaveStatus({ kind: "saving", message: "Saving Voyager project metadata..." });
+      const nextHistory = recordVersionSnapshot("manual");
+      await writeProjectMetadata({ versionHistory: nextHistory });
+      setSaveStatus({ kind: "saved", message: "Saved Voyager project metadata." });
+    } catch (error) {
+      setSaveStatus({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Could not save Voyager project metadata.",
+      });
+    }
+  }, [recordVersionSnapshot, writeProjectMetadata]);
 
   useEffect(() => {
-    if (!hydrated || !settings.autoSave || !settings.robotCodeProjectFolder) return;
+    if (!hydrated || !settings.autoSave) return;
     if (autoSaveTimerRef.current) window.clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = window.setTimeout(() => {
-      void saveAll();
+      if (settings.robotCodeProjectFolder) void saveAll("auto");
+      else recordVersionSnapshot("auto");
     }, 900);
-  }, [hydrated, pathDataByName, saveAll, settings.autoSave, settings.robotCodeProjectFolder, treeNodes]);
+  }, [hydrated, obstacles, pathDataByName, recordVersionSnapshot, saveAll, settings.autoSave, settings.robotCodeProjectFolder, treeNodes]);
+
+  useEffect(() => {
+    if (!hydrated || !settings.autoSaveMetadata || settings.autoSave || !settings.robotCodeProjectFolder) return;
+    if (metadataAutoSaveTimerRef.current) window.clearTimeout(metadataAutoSaveTimerRef.current);
+    metadataAutoSaveTimerRef.current = window.setTimeout(() => {
+      void writeProjectMetadata().catch((error: unknown) => {
+        console.error("Could not automatically save Voyager metadata.", error);
+      });
+    }, 1_000);
+  }, [hydrated, settings.autoSave, settings.autoSaveMetadata, settings.robotCodeProjectFolder, writeProjectMetadata]);
 
   useEffect(() => {
     return () => {
       if (persistTimerRef.current) window.clearTimeout(persistTimerRef.current);
       if (autoSaveTimerRef.current) window.clearTimeout(autoSaveTimerRef.current);
+      if (metadataAutoSaveTimerRef.current) window.clearTimeout(metadataAutoSaveTimerRef.current);
       if (historyCommitTimerRef.current) window.clearTimeout(historyCommitTimerRef.current);
       if (dragOperationRef.current) dragOperationRef.current();
     };
   }, []);
+
+  const selectedObstacle = useMemo(
+    () => obstacles.find((obstacle) => obstacle.id === selectedObstacleId) ?? null,
+    [obstacles, selectedObstacleId],
+  );
+
+  const addObstacle = useCallback((): void => {
+    const obstacle: FieldObstacle = {
+      id: createId("obstacle"),
+      name: `Obstacle ${obstacles.length + 1}`,
+      x: settings.fieldLengthMeters / 2,
+      y: settings.fieldWidthMeters / 2,
+      length: Math.min(1.2, settings.fieldLengthMeters),
+      width: Math.min(1.2, settings.fieldWidthMeters),
+    };
+    setObstacles((current) => [...current, obstacle]);
+    setSelectedObstacleId(obstacle.id);
+    setSaveStatus({ kind: "saved", message: `Added ${obstacle.name} to the field map.` });
+  }, [obstacles.length, settings.fieldLengthMeters, settings.fieldWidthMeters]);
+
+  const updateObstacle = useCallback((id: string, patch: Partial<FieldObstacle>): void => {
+    setObstacles((current) => current.map((obstacle, index) => {
+      if (obstacle.id !== id) return obstacle;
+      const normalized = normalizeObstacle({ ...obstacle, ...patch, id: obstacle.id }, index, settings);
+      return patch.name === undefined ? normalized : { ...normalized, name: patch.name };
+    }));
+  }, [settings]);
+
+  const deleteObstacle = useCallback((id: string): void => {
+    const name = obstacles.find((obstacle) => obstacle.id === id)?.name ?? "obstacle";
+    setObstacles((current) => current.filter((obstacle) => obstacle.id !== id));
+    setSelectedObstacleId((current) => current === id ? null : current);
+    setSaveStatus({ kind: "saved", message: `Removed ${name} from the field map.` });
+  }, [obstacles]);
+
+  const beginObstacleMove = useCallback((event: ReactPointerEvent<HTMLDivElement>, obstacle: FieldObstacle): void => {
+    if ((event.target as HTMLElement).closest("button")) return;
+    const field = obstacleFieldRef.current;
+    if (!field || obstacleFieldSize.width <= 0 || obstacleFieldSize.height <= 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setSelectedObstacleId(obstacle.id);
+    const bounds = field.getBoundingClientRect();
+    const initialCenter = pointToPixels(settings, obstacleFieldSize, obstacle);
+    const pointerOffset = {
+      x: event.clientX - bounds.left - initialCenter.x,
+      y: event.clientY - bounds.top - initialCenter.y,
+    };
+    const move = (clientX: number, clientY: number): void => {
+      const point = pixelsToPoint(settings, obstacleFieldSize, {
+        x: clamp(clientX - bounds.left - pointerOffset.x, 0, bounds.width),
+        y: clamp(clientY - bounds.top - pointerOffset.y, 0, bounds.height),
+      });
+      updateObstacle(obstacle.id, {
+        x: clamp(point.x, obstacle.length / 2, settings.fieldLengthMeters - obstacle.length / 2),
+        y: clamp(point.y, obstacle.width / 2, settings.fieldWidthMeters - obstacle.width / 2),
+      });
+    };
+    move(event.clientX, event.clientY);
+    const onPointerMove = (moveEvent: PointerEvent): void => move(moveEvent.clientX, moveEvent.clientY);
+    const onPointerUp = (): void => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      dragOperationRef.current = null;
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    dragOperationRef.current = () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+  }, [obstacleFieldRef, obstacleFieldSize, settings, updateObstacle]);
+
+  const beginObstacleResize = useCallback((event: ReactPointerEvent<HTMLButtonElement>, obstacle: FieldObstacle, edge: ObstacleResizeEdge): void => {
+    const field = obstacleFieldRef.current;
+    if (!field || obstacleFieldSize.width <= 0 || obstacleFieldSize.height <= 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setSelectedObstacleId(obstacle.id);
+    const bounds = field.getBoundingClientRect();
+    const initial = obstacleStyle(settings, obstacleFieldSize, obstacle);
+    let left = Number(initial.left);
+    let top = Number(initial.top);
+    let right = left + Number(initial.width);
+    let bottom = top + Number(initial.height);
+    const minimumWidth = Math.max(3, (0.05 / settings.fieldLengthMeters) * obstacleFieldSize.width);
+    const minimumHeight = Math.max(3, (0.05 / settings.fieldWidthMeters) * obstacleFieldSize.height);
+    const resize = (clientX: number, clientY: number): void => {
+      const x = clamp(clientX - bounds.left, 0, obstacleFieldSize.width);
+      const y = clamp(clientY - bounds.top, 0, obstacleFieldSize.height);
+      if (edge === "left") left = clamp(x, 0, right - minimumWidth);
+      if (edge === "right") right = clamp(x, left + minimumWidth, obstacleFieldSize.width);
+      if (edge === "top") top = clamp(y, 0, bottom - minimumHeight);
+      if (edge === "bottom") bottom = clamp(y, top + minimumHeight, obstacleFieldSize.height);
+      const center = pixelsToPoint(settings, obstacleFieldSize, {
+        x: (left + right) / 2,
+        y: (top + bottom) / 2,
+      });
+      updateObstacle(obstacle.id, {
+        x: center.x,
+        y: center.y,
+        length: clamp(((right - left) / obstacleFieldSize.width) * settings.fieldLengthMeters, 0.05, settings.fieldLengthMeters),
+        width: clamp(((bottom - top) / obstacleFieldSize.height) * settings.fieldWidthMeters, 0.05, settings.fieldWidthMeters),
+      });
+    };
+    resize(event.clientX, event.clientY);
+    const onPointerMove = (moveEvent: PointerEvent): void => resize(moveEvent.clientX, moveEvent.clientY);
+    const onPointerUp = (): void => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      dragOperationRef.current = null;
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    dragOperationRef.current = () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+  }, [obstacleFieldRef, obstacleFieldSize, settings, updateObstacle]);
+
+  const togglePathPlanner = useCallback((): void => {
+    if (!activePathName) {
+      setError("Select a path block before using the obstacle-aware planner.");
+      return;
+    }
+    setPathPlannerActive((active) => {
+      const next = !active;
+      setPathPlannerPoints([]);
+      setPathPlannerStartWaypointId(null);
+      setSaveStatus({ kind: "idle", message: next ? "Path planner ready: click an existing waypoint or an empty start point, then choose the destination." : "Path planner cancelled." });
+      return next;
+    });
+  }, [activePathName, setError]);
+
+  const finishPlannedPath = useCallback((destination: MeterPoint): void => {
+    const start = pathPlannerPoints[0];
+    if (!start) return;
+    if (!plannerPointIsClear(destination, obstacles, settings)) {
+      setError("That destination collides with an inflated obstacle. Choose a clear location.");
+      return;
+    }
+    const planned = planCollisionFreePath(start, destination, obstacles, settings);
+    if (!planned) {
+      setError("No collision-free path was found. Move an endpoint or adjust the obstacle map.");
+      return;
+    }
+    const generatedWaypoints: Waypoint[] = planned.map((plannedPoint, index) => {
+      const next = planned[Math.min(index + 1, planned.length - 1)];
+      const previous = planned[Math.max(0, index - 1)];
+      const direction = index < planned.length - 1
+        ? { x: next.x - plannedPoint.x, y: next.y - plannedPoint.y }
+        : { x: plannedPoint.x - previous.x, y: plannedPoint.y - previous.y };
+      return {
+        id: createId("waypoint"),
+        x: Number(plannedPoint.x.toFixed(3)),
+        y: Number(plannedPoint.y.toFixed(3)),
+        angle: normalizeCompassDegrees((Math.atan2(direction.y, direction.x) * 180) / Math.PI),
+        handoff: settings.defaultIntermediateHandOffRadiusMeters,
+        profiled: true,
+      };
+    });
+
+    updateActivePathData((current) => {
+      const startIndex = pathPlannerStartWaypointId
+        ? current.waypoints.findIndex((waypoint) => waypoint.id === pathPlannerStartWaypointId)
+        : -1;
+      const preserved = startIndex >= 0 ? current.waypoints.slice(0, startIndex + 1) : [];
+      if (preserved.length > 0 && generatedWaypoints[0]) {
+        preserved[preserved.length - 1] = {
+          ...preserved[preserved.length - 1],
+          angle: generatedWaypoints[0].angle,
+        };
+      }
+      const waypoints = preserved.length > 0
+        ? [...preserved, ...generatedWaypoints.slice(1)]
+        : generatedWaypoints;
+      const maxPosition = Math.max(0, waypoints.length - 1);
+      return {
+        ...current,
+        waypoints,
+        rotationTargets: current.rotationTargets.map((item) => ({ ...item, position: clamp(item.position, 0, maxPosition) })),
+        events: current.events.map((item) => ({ ...item, position: clamp(item.position, 0, maxPosition) })),
+        eventZones: current.eventZones.map((item) => ({ ...item, startPosition: clamp(item.startPosition, 0, maxPosition), endPosition: clamp(item.endPosition, 0, maxPosition) })),
+        constraintZones: current.constraintZones.map((item) => ({ ...item, startPosition: clamp(item.startPosition, 0, maxPosition), endPosition: clamp(item.endPosition, 0, maxPosition) })),
+      };
+    });
+    setPathPlannerPoints([]);
+    setPathPlannerStartWaypointId(null);
+    setPathPlannerActive(false);
+    const appendedWaypointCount = Math.max(0, generatedWaypoints.length - 1);
+    setSaveStatus({
+      kind: "saved",
+      message: pathPlannerStartWaypointId
+        ? `Extended the path from the selected waypoint with ${appendedWaypointCount} optimized waypoint${appendedWaypointCount === 1 ? "" : "s"}.`
+        : `Generated a smooth collision-aware path with ${generatedWaypoints.length} optimized waypoints.`,
+    });
+  }, [obstacles, pathPlannerPoints, pathPlannerStartWaypointId, setError, settings, updateActivePathData]);
+
+  const selectPlannerPoint = useCallback((event: ReactMouseEvent<HTMLDivElement>): void => {
+    if (!pathPlannerActive) return;
+    const target = event.target as HTMLElement;
+    if (target.closest(".robot-marker, .event-trigger-marker, .event-zone-handle, .constraint-handle")) return;
+    const field = fieldOneRef.current;
+    if (!field || fieldOneSize.width <= 0 || fieldOneSize.height <= 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const bounds = field.getBoundingClientRect();
+    const rawPoint = pixelsToPoint(settings, fieldOneSize, { x: event.clientX - bounds.left, y: event.clientY - bounds.top });
+    const point = {
+      x: clamp(rawPoint.x, settings.robotLengthMeters / 2, settings.fieldLengthMeters - settings.robotLengthMeters / 2),
+      y: clamp(rawPoint.y, settings.robotWidthMeters / 2, settings.fieldWidthMeters - settings.robotWidthMeters / 2),
+    };
+    if (pathPlannerPoints.length === 0) {
+      if (!plannerPointIsClear(point, obstacles, settings)) {
+        setError("That start point collides with an inflated obstacle. Choose a clear location.");
+        return;
+      }
+      setPathPlannerStartWaypointId(null);
+      setPathPlannerPoints([point]);
+      setSaveStatus({ kind: "idle", message: "Start point selected. Click the destination point." });
+      return;
+    }
+    finishPlannedPath(point);
+  }, [fieldOneRef, fieldOneSize, finishPlannedPath, obstacles, pathPlannerActive, pathPlannerPoints, setError, settings]);
+
+  const selectPlannerWaypoint = useCallback((event: ReactPointerEvent<HTMLDivElement>, waypoint: Waypoint): void => {
+    if (!pathPlannerActive) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const point = { x: waypoint.x, y: waypoint.y };
+    if (pathPlannerPoints.length > 0) {
+      finishPlannedPath(point);
+      return;
+    }
+    if (!plannerPointIsClear(point, obstacles, settings)) {
+      setError("That waypoint overlaps an inflated obstacle. Choose a different start waypoint.");
+      return;
+    }
+    setPathPlannerStartWaypointId(waypoint.id);
+    setPathPlannerPoints([point]);
+    setSaveStatus({ kind: "idle", message: "Waypoint selected as the pathfinding start. Click the destination point." });
+  }, [finishPlannedPath, obstacles, pathPlannerActive, pathPlannerPoints.length, setError, settings]);
 
   const fieldBackgroundStyle = useMemo<CSSProperties>(() => ({
     aspectRatio: `${settings.fieldLengthMeters} / ${settings.fieldWidthMeters}`,
@@ -3245,37 +4343,44 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const activeWaypointModal = modal?.kind === "waypoint" ? activePathData.waypoints.find((waypoint) => waypoint.id === modal.id) ?? null : null;
   const activeRotationTargetModal = modal?.kind === "rotationTarget" ? activePathData.rotationTargets.find((target) => target.id === modal.id) ?? null : null;
   const activeEventTriggerModal = modal?.kind === "eventTrigger" ? activePathData.events.find((event) => event.id === modal.id) ?? null : null;
+  const activeEventZoneModal = modal?.kind === "eventZone" ? activePathData.eventZones.find((zone) => zone.id === modal.id) ?? null : null;
   const activeConstraintZoneModal = modal?.kind === "constraintZone" ? activePathData.constraintZones.find((zone) => zone.id === modal.id) ?? null : null;
+  const versionHistoryRows = useMemo(() => {
+    return versionHistory.map((snapshot) => {
+      const paths = Object.keys(snapshot.pathDataByName).length;
+      const waypoints = Object.values(snapshot.pathDataByName).reduce((total, path) => total + path.waypoints.length, 0);
+      return { snapshot, paths, nodes: snapshot.treeNodes.length, waypoints };
+    }).reverse();
+  }, [versionHistory]);
 
   return (
-    <div ref={appRef} className={`voyager-app layout-${settings.layoutMode}`} style={appThemeStyle} onClick={closeMenus}>
+    <div ref={appRef} className={`voyager-app layout-${settings.layoutMode} design-${settings.designPreset}`} style={appThemeStyle} onClick={closeMenus}>
       <header className="voyager-nav">
         <div className="nav-left">
           <div className="app-icon" aria-hidden="true">V</div>
           <strong className="app-name">Voyager</strong>
-          <span className="version-chip">2.4.3</span>
-          <div className="save-control" onClick={(event) => event.stopPropagation()}>
-            <button className="nav-button" type="button" onClick={() => setSaveMenuOpen((open) => !open)}>
-              Save <span aria-hidden="true">▾</span>
-            </button>
-            {saveMenuOpen ? (
-              <div className="dropdown-menu save-menu">
-                <button type="button" onClick={() => void saveCurrentPath()}>Save this path</button>
-                <button type="button" onClick={() => void saveAll()}>Save all paths</button>
-                <label className="dropdown-check">
-                  <input
-                    type="checkbox"
-                    checked={settings.autoSave}
-                    onChange={(event) => updateSettings({ autoSave: event.target.checked })}
-                  />
-                  Save automatically
-                </label>
-              </div>
-            ) : null}
-          </div>
+          <span className="version-chip">{VOYAGER_VERSION}</span>
+          <button className="nav-button" type="button" onClick={(event) => { event.stopPropagation(); setSaveModalOpen(true); }}>
+            Save
+          </button>
           <button className="nav-button" type="button" onClick={(event) => { event.stopPropagation(); setSettingsOpen(true); }}>
             Settings
           </button>
+          <button className="nav-button" type="button" onClick={(event) => { event.stopPropagation(); setVersionHistoryOpen(true); }}>
+            Version History
+          </button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="nav-button obstacle-map-button"
+            onClick={(event) => {
+              event.stopPropagation();
+              setObstaclesOpen(true);
+            }}
+          >
+            <Boxes data-icon="inline-start" />
+            Obstacle Map
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -3349,6 +4454,70 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                 <div className="history-actions" aria-label="Editor history controls">
                   <button type="button" onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)">Undo</button>
                   <button type="button" onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Y)">Redo</button>
+                  <div className="field-more-tools" onClick={(event) => event.stopPropagation()}>
+                    <button
+                      type="button"
+                      className={moreToolsOpen ? "is-active" : ""}
+                      aria-haspopup="menu"
+                      aria-expanded={moreToolsOpen}
+                      onClick={() => setMoreToolsOpen((open) => !open)}
+                      title="Open mirroring and obstacle visibility tools"
+                    >
+                      <Sparkles aria-hidden="true" /> More Tools <span className="more-tools-chevron" aria-hidden="true">▾</span>
+                    </button>
+                    {moreToolsOpen ? (
+                      <div className="dropdown-menu field-tools-menu" role="menu" aria-label="More field tools">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          disabled={!activePathName}
+                          onClick={() => {
+                            mirrorActivePath("x");
+                            setMoreToolsOpen(false);
+                          }}
+                          title="Mirror selected path across the X coordinate"
+                        >
+                          Mirror X
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          disabled={!activePathName}
+                          onClick={() => {
+                            mirrorActivePath("y");
+                            setMoreToolsOpen(false);
+                          }}
+                          title="Mirror selected path across the Y coordinate"
+                        >
+                          Mirror Y
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitemcheckbox"
+                          aria-checked={settings.showObstacleZones}
+                          className={settings.showObstacleZones ? "is-checked" : ""}
+                          onClick={() => {
+                            updateSettings({ showObstacleZones: !settings.showObstacleZones });
+                            setMoreToolsOpen(false);
+                          }}
+                          title={settings.showObstacleZones ? "Hide obstacle clearance zones" : "Show obstacle clearance zones"}
+                        >
+                          {settings.showObstacleZones ? <Eye aria-hidden="true" /> : <EyeOff aria-hidden="true" />}
+                          <span>{settings.showObstacleZones ? "Hide obstacles" : "Show obstacles"}</span>
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    className={pathPlannerActive ? "is-active" : ""}
+                    aria-pressed={pathPlannerActive}
+                    onClick={togglePathPlanner}
+                    disabled={!activePathName}
+                    title="Select two field points and generate a collision-aware path"
+                  >
+                    <Route aria-hidden="true" /> Plan path
+                  </button>
                   <button
                     type="button"
                     className={playbackOpen ? "is-active" : ""}
@@ -3363,6 +4532,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                   <option value="waypoint">Waypoint</option>
                   <option value="rotationTarget">Rotation Target</option>
                   <option value="eventTrigger">Event Trigger</option>
+                  <option value="eventZone">Event Zone</option>
                   <option value="constraintZone">Constraint Zone</option>
                 </select>
                 <button type="button" onClick={addPathElement}>Add</button>
@@ -3370,8 +4540,22 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
             </div>
 
             <div className="field-scroll-shell" aria-label="Scrollable autonomous field">
-              <div ref={fieldOneRef} className={`field-surface ${settings.fieldImageDataUrl ? "has-field-image" : ""}`} style={fieldBackgroundStyle}>
+              <div
+                ref={fieldOneRef}
+                className={`field-surface ${settings.fieldImageDataUrl ? "has-field-image" : ""} ${pathPlannerActive ? "is-planning" : ""}`}
+                style={fieldBackgroundStyle}
+                onClick={selectPlannerPoint}
+              >
               {!settings.fieldImageDataUrl ? <div className="field-placeholder">Field image<br />{formatNumber(settings.fieldLengthMeters)} × {formatNumber(settings.fieldWidthMeters)} m</div> : null}
+              {settings.showObstacleZones ? obstacles.map((obstacle) => (
+                <div key={`auto-${obstacle.id}`} className="field-obstacle-overlay" style={plannerObstacleStyle(settings, fieldOneSize, obstacle)} title={`${obstacle.name} robot-clearance envelope`}>
+                  <span>{obstacle.name}</span>
+                </div>
+              )) : null}
+              {pathPlannerPoints.map((point, index) => {
+                const pixel = pointToPixels(settings, fieldOneSize, point);
+                return <i key={`${point.x}-${point.y}-${index}`} className="planner-point-marker" style={{ left: pixel.x, top: pixel.y }}>{index === 0 ? "A" : "B"}</i>;
+              })}
               <svg className="field-svg" viewBox={`0 0 ${Math.max(1, fieldOneSize.width)} ${Math.max(1, fieldOneSize.height)}`}>
                 {activePathData.waypoints.slice(1).map((waypoint, index) => {
                   const previous = activePathData.waypoints[index];
@@ -3383,6 +4567,11 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                   const points = pathPixelsBetween(settings, fieldOneSize, activePathData.waypoints, zone.startPosition, zone.endPosition);
                   if (points.length < 2) return null;
                   return <polyline key={zone.id} className="constraint-zone-line" points={points.map((point) => `${point.x},${point.y}`).join(" ")} />;
+                })}
+                {activePathData.eventZones.map((zone) => {
+                  const points = pathPixelsBetween(settings, fieldOneSize, activePathData.waypoints, zone.startPosition, zone.endPosition);
+                  if (points.length < 2) return null;
+                  return <polyline key={zone.id} className="event-zone-line" points={points.map((point) => `${point.x},${point.y}`).join(" ")} />;
                 })}
               </svg>
 
@@ -3416,7 +4605,10 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                   key={waypoint.id}
                   className="robot-marker waypoint-marker"
                   style={robotRenderStyle(settings, fieldOneSize, waypoint.x, waypoint.y, waypoint.angle)}
-                  onPointerDown={(event) => beginWaypointDrag(event, waypoint)}
+                  onPointerDown={(event) => {
+                    if (pathPlannerActive) selectPlannerWaypoint(event, waypoint);
+                    else beginWaypointDrag(event, waypoint);
+                  }}
                   onDoubleClick={(event) => {
                     event.stopPropagation();
                     addWaypointAfterIfLast(waypoint);
@@ -3466,6 +4658,42 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                       setModal({ kind: "eventTrigger", id: eventTrigger.id, x: pos.x, y: pos.y });
                     }}
                   />
+                );
+              })}
+
+              {activePathData.eventZones.map((zone) => {
+                const start = pointAtPathPosition(activePathData.waypoints, zone.startPosition);
+                const end = pointAtPathPosition(activePathData.waypoints, zone.endPosition);
+                if (!start || !end) return null;
+                const startPixel = pointToPixels(settings, fieldOneSize, start);
+                const endPixel = pointToPixels(settings, fieldOneSize, end);
+                return (
+                  <React.Fragment key={zone.id}>
+                    <button
+                      className="event-zone-handle event-zone-handle-start"
+                      type="button"
+                      style={{ left: `${startPixel.x}px`, top: `${startPixel.y}px` }}
+                      title={`Start ${zone.startName}`}
+                      onPointerDown={(event) => beginPathPositionDrag(event, (position) => updateEventZone(zone.id, { startPosition: position }))}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        const pos = modalPositionFromEvent(event);
+                        setModal({ kind: "eventZone", id: zone.id, x: pos.x, y: pos.y });
+                      }}
+                    >S</button>
+                    <button
+                      className="event-zone-handle event-zone-handle-end"
+                      type="button"
+                      style={{ left: `${endPixel.x}px`, top: `${endPixel.y}px` }}
+                      title={`End ${zone.endName}`}
+                      onPointerDown={(event) => beginPathPositionDrag(event, (position) => updateEventZone(zone.id, { endPosition: position }))}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        const pos = modalPositionFromEvent(event);
+                        setModal({ kind: "eventZone", id: zone.id, x: pos.x, y: pos.y });
+                      }}
+                    >E</button>
+                  </React.Fragment>
                 );
               })}
 
@@ -3697,17 +4925,15 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
             ) : null}
             <svg className="tree-svg" style={{ transform: `translate(${pan.x}px, ${pan.y}px)`, pointerEvents: "auto" }} width="3200" height="2200">
               {treeEdges.map(({ parent, child, label, slot }) => {
-                const start = { x: parent.x + NODE_WIDTH, y: parent.y + NODE_HEIGHT / 2 };
-                const end = { x: child.x, y: child.y + NODE_HEIGHT / 2 };
-                const controlOffset = Math.max(60, Math.abs(end.x - start.x) / 2);
-                const d = `M ${start.x} ${start.y} C ${start.x + controlOffset} ${start.y}, ${end.x - controlOffset} ${end.y}, ${end.x} ${end.y}`;
+                const geometry = nearestTreeEdgeGeometry(parent, child);
+                const d = `M ${geometry.start.x} ${geometry.start.y} C ${geometry.startControl.x} ${geometry.startControl.y}, ${geometry.endControl.x} ${geometry.endControl.y}, ${geometry.end.x} ${geometry.end.y}`;
                 return (
                   <g key={`${parent.id}-${child.id}-${slot}`}>
                     <path className={`tree-edge tree-edge-${slot}`} d={d} style={{ pointerEvents: "none" }} />
                     <text
                       className="tree-edge-label"
-                      x={(start.x + end.x) / 2}
-                      y={(start.y + end.y) / 2 - 7}
+                      x={geometry.label.x}
+                      y={geometry.label.y - 7}
                       style={{ cursor: "context-menu", pointerEvents: "auto" }}
                       onPointerDown={(event) => event.stopPropagation()}
                       onContextMenu={(event) => showEdgeMenu(event, parent.id, child.id, slot, label)}
@@ -3771,17 +4997,206 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
         </section>
       </main>
 
+      <Dialog open={saveModalOpen} onOpenChange={setSaveModalOpen}>
+        <DialogContent className="save-dialog">
+          <DialogHeader className="save-dialog-header">
+            <div className="preferences-title-icon" aria-hidden="true"><GitBranch /></div>
+            <div>
+              <DialogTitle>Save Voyager project</DialogTitle>
+              <DialogDescription>Save routine files and control project-backed metadata from one place.</DialogDescription>
+            </div>
+          </DialogHeader>
+          <div className="save-dialog-body">
+            <section className="save-action-grid" aria-label="Save actions">
+              <button type="button" className="save-action-card" disabled={!activePathName} onClick={() => void saveCurrentPath()}>
+                <strong>Save this path</strong>
+                <span>{activePathName ? `Write ${activePathName}.json and a version snapshot.` : "Select a path block to enable this action."}</span>
+              </button>
+              <button type="button" className="save-action-card is-primary" onClick={() => void saveAll()}>
+                <strong>Save all paths</strong>
+                <span>Write every path, auto_config.json, metadata, and a version snapshot.</span>
+              </button>
+              <button type="button" className="save-action-card" onClick={() => void saveMetadataNow()}>
+                <strong>Save metadata now</strong>
+                <span>Write the full workspace and version history without exporting routine files.</span>
+              </button>
+            </section>
+            <section className="save-options" aria-label="Automatic save and publish options">
+              <label className="save-option-row">
+                <input type="checkbox" checked={settings.autoSave} onChange={(event) => updateSettings({ autoSave: event.target.checked })} />
+                <span><strong>Save paths automatically</strong><small>Export routine files and capture snapshots after edits.</small></span>
+              </label>
+              <label className="save-option-row">
+                <input type="checkbox" checked={settings.autoSaveMetadata} onChange={(event) => updateSettings({ autoSaveMetadata: event.target.checked })} />
+                <span><strong>Save metadata automatically</strong><small>Keep voyager/assets/metadata.json synchronized after workspace edits.</small></span>
+              </label>
+              <label className="save-option-row">
+                <input type="checkbox" checked={settings.autoPublishOnConnect} onChange={(event) => updateSettings({ autoPublishOnConnect: event.target.checked })} />
+                <span><strong>Publish selected auto on connect</strong><small>Send the current selected routine to /Voyager/SelectedAuto when the robot connects.</small></span>
+              </label>
+            </section>
+            <div className="save-project-location">
+              <strong>Project target</strong>
+              <span>{settings.robotCodeProjectFolder ? getVoyagerDeployFolder(settings.robotCodeProjectFolder) : "No robot project selected. Choose one in Settings before saving."}</span>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={versionHistoryOpen} onOpenChange={setVersionHistoryOpen}>
+        <DialogContent className="version-history-dialog">
+          <DialogHeader className="version-history-header">
+            <div className="preferences-title-icon" aria-hidden="true"><GitBranch /></div>
+            <div>
+              <DialogTitle>Version History</DialogTitle>
+              <DialogDescription>Project-backed auto-save and manual snapshots of both path data and the path tree.</DialogDescription>
+            </div>
+          </DialogHeader>
+          <div className="version-history-toolbar">
+            <div className="history-timeline-legend"><GitBranch aria-hidden="true" /><span>Snapshot timeline · newest first</span></div>
+            <button type="button" onClick={() => void importProjectMetadata()} disabled={!settings.robotCodeProjectFolder}>Load project metadata</button>
+          </div>
+          <div className="version-history-scroll">
+            {versionHistoryRows.length === 0 ? (
+              <div className="version-history-empty">No snapshots yet. Enable Save paths automatically or save a path to create one.</div>
+            ) : (
+              <div className="version-history-timeline">
+                {versionHistoryRows.map(({ snapshot, paths, nodes, waypoints }) => (
+                  <article key={snapshot.id} className={`version-history-entry ${snapshot.source}`}>
+                    <div className={`version-history-node ${snapshot.source}`} aria-hidden="true"><i /></div>
+                    <div className="version-history-entry-card">
+                      <div className="version-history-entry-head">
+                        <div>
+                          <strong>{snapshot.source === "auto" ? "Auto-save snapshot" : "Manual save snapshot"}</strong>
+                          <time dateTime={new Date(snapshot.timestamp).toISOString()}>{new Date(snapshot.timestamp).toLocaleString()}</time>
+                        </div>
+                        <button type="button" onClick={() => restoreVersionSnapshot(snapshot)}>Restore</button>
+                      </div>
+                      <div className="version-history-stats" aria-label={`${paths} paths, ${nodes} tree blocks, and ${waypoints} waypoints`}>
+                        <span><strong>{paths}</strong> path{paths === 1 ? "" : "s"}</span>
+                        <span><strong>{nodes}</strong> tree block{nodes === 1 ? "" : "s"}</span>
+                        <span><strong>{waypoints}</strong> waypoint{waypoints === 1 ? "" : "s"}</span>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={obstaclesOpen} onOpenChange={setObstaclesOpen}>
+        <DialogContent className="obstacle-dialog">
+          <DialogHeader className="obstacle-dialog-header">
+            <div className="preferences-title-icon" aria-hidden="true"><Boxes /></div>
+            <div>
+              <DialogTitle>Field obstacle map</DialogTitle>
+              <DialogDescription>Move and resize measured field obstacles. Coordinates use the configured field origin and dimensions.</DialogDescription>
+            </div>
+          </DialogHeader>
+          <div className="obstacle-toolbar">
+            <div><strong>{obstacles.length}</strong> obstacle{obstacles.length === 1 ? "" : "s"} · robot clearance is included by the planner</div>
+            <button type="button" className="primary-tool-button" onClick={addObstacle}><Plus aria-hidden="true" /> Add obstacle</button>
+          </div>
+          <div className="obstacle-workspace">
+            <div className="obstacle-field-scroll" aria-label="Scrollable obstacle field editor">
+              <div
+                ref={obstacleFieldRef}
+                className={`obstacle-field-surface ${settings.fieldImageDataUrl ? "has-field-image" : ""}`}
+                style={fieldBackgroundStyle}
+                onClick={() => setSelectedObstacleId(null)}
+              >
+                {!settings.fieldImageDataUrl ? <div className="field-placeholder">Field image<br />{formatNumber(settings.fieldLengthMeters)} × {formatNumber(settings.fieldWidthMeters)} m</div> : null}
+                {obstacles.map((obstacle) => (
+                  <div
+                    key={obstacle.id}
+                    className={`editable-obstacle ${selectedObstacleId === obstacle.id ? "is-selected" : ""}`}
+                    style={obstacleStyle(settings, obstacleFieldSize, obstacle)}
+                    onPointerDown={(event) => beginObstacleMove(event, obstacle)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setSelectedObstacleId(obstacle.id);
+                    }}
+                  >
+                    <span>{obstacle.name}</span>
+                    <small>{formatNumber(obstacle.x, 2)}, {formatNumber(obstacle.y, 2)} m</small>
+                    {(["left", "right", "top", "bottom"] as ObstacleResizeEdge[]).map((edge) => (
+                      <button
+                        key={edge}
+                        type="button"
+                        tabIndex={-1}
+                        className={`obstacle-resize-edge edge-${edge}`}
+                        aria-label={`Resize ${obstacle.name} from the ${edge} side`}
+                        onPointerDown={(event) => beginObstacleResize(event, obstacle, edge)}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <aside className="obstacle-inspector">
+              <section className="obstacle-list" aria-label="All field obstacles">
+                <div className="obstacle-list-heading"><strong>All obstacles</strong><span>{obstacles.length}</span></div>
+                <div className="obstacle-list-scroll">
+                  {obstacles.length === 0 ? <p>Add an obstacle to begin mapping the field.</p> : obstacles.map((obstacle, index) => (
+                    <div key={`list-${obstacle.id}`} className={`obstacle-list-row ${selectedObstacleId === obstacle.id ? "is-selected" : ""}`}>
+                      <button type="button" aria-label={`Select ${obstacle.name || `Obstacle ${index + 1}`}`} onClick={() => setSelectedObstacleId(obstacle.id)}>
+                        <i aria-hidden="true" />
+                      </button>
+                      <label>
+                        <span className="sr-only">Obstacle name</span>
+                        <input
+                          type="text"
+                          value={obstacle.name}
+                          onFocus={() => setSelectedObstacleId(obstacle.id)}
+                          onChange={(event) => updateObstacle(obstacle.id, { name: event.target.value })}
+                          onBlur={(event) => updateObstacle(obstacle.id, { name: event.target.value.trim() || `Obstacle ${index + 1}` })}
+                        />
+                        <small>{formatNumber(obstacle.x, 2)}, {formatNumber(obstacle.y, 2)} · {formatNumber(obstacle.length, 2)} × {formatNumber(obstacle.width, 2)} m</small>
+                      </label>
+                    </div>
+                  ))}
+                </div>
+              </section>
+              {selectedObstacle ? (
+                <>
+                  <div className="obstacle-inspector-title"><strong>Obstacle geometry</strong><button type="button" className="icon-danger-button" aria-label={`Delete ${selectedObstacle.name}`} onClick={() => deleteObstacle(selectedObstacle.id)}><Trash2 /></button></div>
+                  <label>Name<input type="text" value={selectedObstacle.name} onChange={(event) => updateObstacle(selectedObstacle.id, { name: event.target.value })} onBlur={(event) => updateObstacle(selectedObstacle.id, { name: event.target.value.trim() || "Obstacle" })} /></label>
+                  <div className="two-column-inputs">
+                    <label>Center X (m)<input type="number" step="0.01" value={formatNumber(selectedObstacle.x, 3)} onChange={(event) => updateObstacle(selectedObstacle.id, { x: Number(event.target.value) })} /></label>
+                    <label>Center Y (m)<input type="number" step="0.01" value={formatNumber(selectedObstacle.y, 3)} onChange={(event) => updateObstacle(selectedObstacle.id, { y: Number(event.target.value) })} /></label>
+                    <label>Length X (m)<input type="number" min="0.05" step="0.01" value={formatNumber(selectedObstacle.length, 3)} onChange={(event) => updateObstacle(selectedObstacle.id, { length: Number(event.target.value) })} /></label>
+                    <label>Width Y (m)<input type="number" min="0.05" step="0.01" value={formatNumber(selectedObstacle.width, 3)} onChange={(event) => updateObstacle(selectedObstacle.id, { width: Number(event.target.value) })} /></label>
+                  </div>
+                  <p>The shaded clearance preview on the Auto maker field includes half the robot dimensions around this measured rectangle.</p>
+                </>
+              ) : (
+                <div className="obstacle-empty-selection"><Boxes /><strong>Select an obstacle</strong><span>Choose a rectangle to inspect exact meter coordinates, move it, or resize it.</span></div>
+              )}
+              <div className="metadata-location"><strong>Project metadata</strong><span>{settings.robotCodeProjectFolder ? `${getVoyagerAssetsFolder(settings.robotCodeProjectFolder)}\\${PROJECT_METADATA_FILE}` : "Select a robot project in Settings to save this map with the routine."}</span></div>
+            </aside>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={preferencesOpen} onOpenChange={setPreferencesOpen}>
         <DialogContent className="preferences-dialog">
           <DialogHeader className="preferences-header">
             <div className="preferences-title-icon" aria-hidden="true"><Sparkles /></div>
             <div>
               <DialogTitle>Appearance preferences</DialogTitle>
-              <DialogDescription>Choose a Voyager theme or build a custom command-center palette. Changes save automatically.</DialogDescription>
+              <DialogDescription>Choose a color theme, build a custom palette, or apply a complete interface design. Changes save automatically.</DialogDescription>
             </div>
           </DialogHeader>
 
+          <div className="preferences-tabs" role="tablist" aria-label="Appearance preference categories">
+            <button type="button" role="tab" aria-selected={preferencesTab === "themes"} className={preferencesTab === "themes" ? "is-active" : ""} onClick={() => setPreferencesTab("themes")}>Themes</button>
+            <button type="button" role="tab" aria-selected={preferencesTab === "designs"} className={preferencesTab === "designs" ? "is-active" : ""} onClick={() => setPreferencesTab("designs")}>Custom Designs</button>
+          </div>
           <div className="preferences-scroll">
+            {preferencesTab === "themes" ? (
+              <>
             <section className="preferences-section">
               <div className="preferences-section-heading">
                 <div>
@@ -3874,6 +5289,52 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                 ))}
               </div>
             </section>
+              </>
+            ) : (
+              <section className="preferences-section design-presets-section">
+                <div className="preferences-section-heading">
+                  <div>
+                    <strong>Custom Designs</strong>
+                    <span>Five validated interface systems that change typography, density, padding, radii, control sizing, and elevation without replacing your color theme.</span>
+                  </div>
+                  <span className="theme-count">5 designs</span>
+                </div>
+                <div className="design-preset-grid">
+                  {DESIGN_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      className={`design-preset-card ${settings.designPreset === preset.id ? "is-selected" : ""}`}
+                      aria-pressed={settings.designPreset === preset.id}
+                      onClick={() => updateSettings({ designPreset: preset.id })}
+                    >
+                      <span
+                        className="design-preset-preview"
+                        style={{
+                          fontFamily: preset.bodyFont,
+                          borderRadius: preset.radiusMedium,
+                          padding: preset.panelPadding,
+                          boxShadow: preset.shadow,
+                        }}
+                      >
+                        <i className="design-preview-nav"><b>Voyager</b><em /></i>
+                        <i className="design-preview-layout"><em /><em /><em /></i>
+                        <i className="design-preview-control" style={{ minHeight: preset.controlHeight, borderRadius: preset.buttonRadius }}>Plan Path</i>
+                      </span>
+                      <span className="design-preset-copy">
+                        <span><strong style={{ fontFamily: preset.displayFont }}>{preset.name}</strong>{settings.designPreset === preset.id ? <i>Active</i> : null}</span>
+                        <small>{preset.description}</small>
+                        <code>{preset.source}</code>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <div className="design-validation-note">
+                  <Sparkles aria-hidden="true" />
+                  <span><strong>Voyager-safe adaptation</strong>Each design keeps minimum target sizes, scrolling behavior, field proportions, modal bounds, and contrast roles intact across aspect ratios.</span>
+                </div>
+              </section>
+            )}
           </div>
         </DialogContent>
       </Dialog>
@@ -4316,6 +5777,23 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                   </label>
                   <p className="settings-help">New waypoints use this radius. Each waypoint’s Handoff field can override it.</p>
 
+                  <div className="planner-settings-group">
+                    <div>
+                      <strong>Obstacle-aware path planner</strong>
+                      <span>A* inflates obstacles by the robot footprint, penalizes turns, prunes line-of-sight nodes, rounds safe corners, and removes unchanged-direction waypoints.</span>
+                    </div>
+                    <label className="slider-setting planner-level-slider">
+                      <span>Relative waypoint amount <output>{PLANNER_LEVEL_LABELS[settings.plannerWaypointDensity]}</output></span>
+                      <input type="range" min="0" max="4" step="1" value={settings.plannerWaypointDensity} onChange={(event) => updateSettings({ plannerWaypointDensity: normalizePlannerLevel(event.target.value) })} />
+                      <i className="planner-level-labels" aria-hidden="true">{PLANNER_LEVEL_LABELS.map((label) => <small key={label}>{label}</small>)}</i>
+                    </label>
+                    <label className="slider-setting planner-level-slider">
+                      <span>Relative path sharpness <output>{PLANNER_LEVEL_LABELS[settings.plannerSharpness]}</output></span>
+                      <input type="range" min="0" max="4" step="1" value={settings.plannerSharpness} onChange={(event) => updateSettings({ plannerSharpness: normalizePlannerLevel(event.target.value) })} />
+                      <i className="planner-level-labels" aria-hidden="true">{PLANNER_LEVEL_LABELS.map((label) => <small key={label}>{label}</small>)}</i>
+                    </label>
+                  </div>
+
                   <div className="controller-group">
                     <strong>Translational controller PID</strong>
                     <div className="three-column-inputs">
@@ -4354,7 +5832,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
         <div ref={elementModalRef} className="element-modal" style={{ left: `${modal.x}px`, top: `${modal.y}px` }} onClick={(event) => event.stopPropagation()}>
           <div className="modal-titlebar draggable" onPointerDown={beginModalDrag}>
             <div>
-              <strong>{modal.kind === "waypoint" ? "Waypoint" : modal.kind === "rotationTarget" ? "Rotation Target" : modal.kind === "eventTrigger" ? "Event Trigger" : "Constraint Zone"}</strong>
+              <strong>{modal.kind === "waypoint" ? "Waypoint" : modal.kind === "rotationTarget" ? "Rotation Target" : modal.kind === "eventTrigger" ? "Event Trigger" : modal.kind === "eventZone" ? "Event Zone" : "Constraint Zone"}</strong>
               <span>{activePathName ?? "No active path"}</span>
             </div>
             <button type="button" aria-label="Close modal" onClick={() => setModal(null)}>×</button>
@@ -4389,6 +5867,21 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                 <input type="range" min="0" max={activeMaxPosition} step="0.01" value={activeEventTriggerModal.position} onChange={(event) => updateEventTrigger(activeEventTriggerModal.id, { position: clamp(Number(event.target.value), 0, activeMaxPosition) })} />
               </label>
               <button className="danger full-button" type="button" onClick={() => deleteEventTrigger(activeEventTriggerModal.id)}>Delete event trigger</button>
+            </div>
+          ) : null}
+
+          {activeEventZoneModal ? (
+            <div className="modal-body grid-two">
+              <label>Start event name<input type="text" value={activeEventZoneModal.startName} onChange={(event) => updateEventZone(activeEventZoneModal.id, { startName: event.target.value })} /></label>
+              <label>End event name<input type="text" value={activeEventZoneModal.endName} onChange={(event) => updateEventZone(activeEventZoneModal.id, { endName: event.target.value })} /></label>
+              <label>Start: {formatNumber(activeEventZoneModal.startPosition, 2)}
+                <input type="range" min="0" max={activeMaxPosition} step="0.01" value={activeEventZoneModal.startPosition} onChange={(event) => updateEventZone(activeEventZoneModal.id, { startPosition: Number(event.target.value) })} />
+              </label>
+              <label>End: {formatNumber(activeEventZoneModal.endPosition, 2)}
+                <input type="range" min="0" max={activeMaxPosition} step="0.01" value={activeEventZoneModal.endPosition} onChange={(event) => updateEventZone(activeEventZoneModal.id, { endPosition: Number(event.target.value) })} />
+              </label>
+              <p className="event-zone-help">Voyager exports this zone as two standard event triggers. Use the end event to cancel or stop the start event on the robot.</p>
+              <button className="danger full-button" type="button" onClick={() => deleteEventZone(activeEventZoneModal.id)}>Delete event zone</button>
             </div>
           ) : null}
 

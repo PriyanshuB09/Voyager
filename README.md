@@ -8,7 +8,7 @@
   A visual desktop autonomous builder for FIRST Robotics Competition teams.
 </p>
 
-Voyager lets an FRC team build an autonomous routine as a branching tree, draw and tune each path on a field, preview the robot's motion, save the resulting JSON into a WPILib project, and publish the selected routine to the robot over NT4. This guide covers the complete Voyager 2.4.3 workflow.
+Voyager lets an FRC team build an autonomous routine as a branching tree, draw and tune each path on a field, plan collision-free routes around measured obstacles, preview the robot's motion, save the complete workspace into a WPILib project, and publish the selected routine to the robot over NT4. This guide covers the Voyager 3.1.1-alpha workflow.
 
 ## Contents
 
@@ -18,10 +18,12 @@ Voyager lets an FRC team build an autonomous routine as a branching tree, draw a
 - [First-time configuration](#first-time-configuration)
 - [Build an autonomous routine](#build-an-autonomous-routine)
 - [Edit a path](#edit-a-path)
+- [Map obstacles and generate a path](#map-obstacles-and-generate-a-path)
 - [Preview a path](#preview-a-path)
 - [Use live robot telemetry](#use-live-robot-telemetry)
 - [Select and publish a routine](#select-and-publish-a-routine)
 - [Save and export](#save-and-export)
+- [Version history](#version-history)
 - [Layouts and appearance](#layouts-and-appearance)
 - [Notifications and activity history](#notifications-and-activity-history)
 - [Keyboard shortcuts](#keyboard-shortcuts)
@@ -34,8 +36,8 @@ Download Voyager from the repository's [GitHub Releases](https://github.com/Priy
 
 | Package | Best for |
 | --- | --- |
-| `Voyager Setup 2.4.3.exe` | Normal Windows installation |
-| `Voyager 2.4.3.exe` | Running Voyager without installing it |
+| `Voyager Setup 3.1.1-alpha.exe` | Normal Windows installation |
+| `Voyager 3.1.1-alpha.exe` | Running Voyager without installing it |
 
 The Windows packages are not digitally code-signed, so SmartScreen may show an **Unknown publisher** warning. Only run packages obtained from the official repository.
 
@@ -73,9 +75,11 @@ Voyager has three primary work areas and a top navigation bar.
 
 The top bar contains:
 
-- **Save**, with commands for the current path, all paths, and automatic saving.
+- **Save**, which opens a centered, background-blurring modal for path export, metadata saving, automatic saving, and publishing on robot connect.
+- **Version History**, which opens restorable snapshots of the full path tree and path collection.
+- **Obstacle Map**, a full-field measured obstacle editor used by the path planner.
 - **Settings**, for the field, robot, constraints, controllers, NT4, and robot-project destination.
-- **Preferences**, for built-in and custom themes.
+- **Preferences**, for built-in/custom color themes and five complete interface designs.
 - **Layout**, with four ways to arrange the workspace.
 - A status message. Hover a visible message to reveal the activity-log button.
 
@@ -88,8 +92,10 @@ Application chrome, labels, field elements, and tree content cannot be accidenta
 This is where the selected path is edited and simulated. Its toolbar contains:
 
 - **Undo** and **Redo**.
+- **More Tools**, a dropdown containing **Mirror X**, **Mirror Y**, and obstacle-overlay visibility.
 - **Playback**, which toggles the path timeline window.
-- A path-element selector for **Waypoint**, **Rotation Target**, **Event Trigger**, or **Constraint Zone**.
+- **Plan path**, which collects a start and destination click and creates a collision-aware route.
+- A path-element selector for **Waypoint**, **Rotation Target**, **Event Trigger**, **Event Zone**, or **Constraint Zone**.
 - **Add**, which adds the selected element type.
 
 The field keeps its configured aspect ratio. If a panel becomes narrower than its content, the field is preserved at full size and the panel becomes scrollable instead of cropping the field image.
@@ -102,7 +108,7 @@ In Auto focus layout, there is no small picture-in-picture live field. The live 
 
 ### Path tree
 
-The path tree describes the order and branching structure of the routine. Drag nodes to arrange them and drag the canvas to pan. Double-click the canvas to reset its pan. A node selected for keyboard actions receives a selection outline; nodes belonging to the routine selected for publishing use the routine highlight.
+The path tree describes the order and branching structure of the routine. Drag nodes to arrange them and drag the canvas to pan. Double-click the canvas to reset its pan. Connection curves automatically attach to the nearest left, right, top, or bottom side center on each node, so links approach from outside rather than crossing through a node when children are arranged in another direction. A node selected for keyboard actions receives a selection outline; nodes belonging to the routine selected for publishing use the routine highlight.
 
 ## First-time configuration
 
@@ -172,6 +178,11 @@ Enter independent `P`, `I`, and `D` gains for:
 
 These values are included in Voyager's playback-time model along with motion limits, local constraint zones, handoff radii, end tolerances, and rotation targets. The displayed duration is an estimate for planning and visualization; real robot timing still depends on the drivetrain, control loop, battery, traction, and robot-side implementation.
 
+The **Obstacle-aware path planner** section has two five-position sliders:
+
+- **Relative waypoint amount** controls A* search-grid detail, from Very low through Very high. Straight runs are collapsed to their endpoints rather than being filled with spacing-only waypoints.
+- **Relative path sharpness** controls turn penalties and safe corner rounding. Lower values produce gentler paths; higher values permit tighter direction changes.
+
 ## Build an autonomous routine
 
 ### Add blocks
@@ -240,6 +251,10 @@ Rotation targets affect the playback robot's orientation, swerve state, and esti
 
 An event trigger associates a robot command name with a position along the path. Drag the marker along the path, then use its editor to set the **Command name**, fine-tune the position, or delete the event.
 
+### Event zones
+
+An Event Zone has a named start event and end event. Drag its **S** and **E** handles along the path, then use its editor to configure both names and positions. Voyager exports it as two standard event triggers, so the end event can cancel or stop the start event according to robot-side behavior.
+
 ### Constraint zones
 
 A constraint zone overrides motion limits for part of a path. Drag its start and end handles along the path, then edit:
@@ -255,6 +270,29 @@ Constraint zones are drawn over the affected path section and are included in bo
 ### Undo and redo
 
 Use the Auto maker toolbar or `Ctrl+Z` and `Ctrl+Y`. Voyager keeps up to 100 editor-history snapshots. Shortcuts are ignored while typing in an input, select, or editable text control.
+
+## Map obstacles and generate a path
+
+Open **Obstacle Map** from the top navigation. The editor displays the complete field at its configured meter scale and remains scrollable when the window is narrower than the field.
+
+1. Press **Add obstacle**.
+2. Drag the obstacle rectangle so it covers the physical field obstacle.
+3. Drag inside the rectangle to move it. Drag its left, right, top, or bottom edge to pull that side independently, or use the inspector for exact **Center X**, **Center Y**, **Length X**, and **Width Y** values in meters.
+4. Repeat for every obstacle that the generated route must avoid.
+
+The right-side obstacle list shows every obstacle, its coordinates and dimensions, and an inline editable name. Select a row to locate its matching rectangle. Obstacle coordinates follow the origin selected in Settings, and Voyager saves the map with the project workspace.
+
+Open **More Tools** in the Auto maker toolbar and choose **Hide obstacles** when the clearance overlays obscure path editing. The planner continues honoring every mapped obstacle while the overlays are hidden; reopen the menu and choose **Show obstacles** to reveal them again.
+
+To generate a route, select a path block and press **Plan path** beside Undo/Redo. Either click an empty start point or click an existing waypoint to use that waypoint as the pathfinding start, then click the destination. The optimized A* planner:
+
+- Inflates every obstacle by the configured robot length and width so the robot frame does not clip it.
+- Searches eight directions with a tunable turn penalty.
+- Removes redundant grid nodes using collision-checked line of sight.
+- Rounds safe corners, then removes forward-collinear points so uninterrupted straight sections contain only the required endpoints.
+- Clamps existing rotation targets, event triggers, Event Zones, and constraint zones to the generated path range.
+
+Starting from empty field space replaces the selected path's waypoint list. Starting from an existing waypoint preserves the routine through that waypoint and replaces only the remaining segment with the generated route. All generated waypoints remain fully editable. If either endpoint is in collision or no route exists, Voyager leaves the path unchanged and reports the problem.
 
 ## Preview a path
 
@@ -307,15 +345,37 @@ First choose the robot project in **Settings**. Voyager writes files to:
 <robot-project>/src/main/deploy/voyager/
 ```
 
-Open **Save** in the top navigation and choose:
+Open **Save** in the top navigation. The screen-centered modal blurs the workspace behind it and offers:
 
 - **Save this path** to write only the path currently open for editing.
 - **Save all paths** to write every path plus `auto_config.json`.
-- **Save automatically** to save all content shortly after a tree or path edit.
+- **Save paths automatically** to export all content shortly after a tree or path edit.
+- **Save metadata now** to write the complete workspace without exporting the path files.
+- **Save metadata automatically** to keep the project metadata synchronized independently of automatic path export.
+- **Publish selected auto on connect** to publish the selected routine whenever a robot connection is detected.
 
 Path names are converted to safe filenames. **Save all paths** also deletes stale generated path files that no longer correspond to a path-tree block. Voyager's editor state and preferences are additionally persisted locally between application sessions.
 
+Every save also writes the portable workspace file:
+
+```text
+<robot-project>/src/main/deploy/voyager/assets/metadata.json
+```
+
+This metadata contains the current settings, field image, obstacle map, paths, path tree, active selection, canvas position, generated-file inventory, and complete snapshot history. Selecting a robot project discovers its saved snapshots. Use **Load project metadata** in Version History when you intentionally want to replace the open workspace with the project copy.
+
 Generated files should normally be committed with the robot project so autonomous definitions are version-controlled beside the code that executes them.
+
+Open **More Tools** in the Auto maker toolbar and choose **Mirror X** or **Mirror Y** to reflect the selected path over that coordinate. Waypoint and rotation-target headings are mirrored too, while event and constraint positions remain on the same path positions.
+
+## Version history
+
+**Version History** contains restorable manual and auto-save snapshots of the entire path tree, all paths, and the obstacle map. The scrollable modal uses one continuous Git-style timeline on the left, with a checkpoint for every timestamped snapshot. Counts for paths, tree blocks, and waypoints are shown as readable values instead of compressed comparison bars.
+
+- Saving creates a manual snapshot.
+- Enabling **Save paths automatically** creates auto-save snapshots after edits, even before selecting a robot project folder.
+- **Restore** replaces the active tree and path data with the selected snapshot.
+- Voyager retains the newest 80 snapshots locally and mirrors them into the robot project's `voyager/assets/metadata.json` file on save.
 
 ## Layouts and appearance
 
@@ -330,9 +390,11 @@ Use the four diagram buttons under **Layout**:
 
 Drag the dividers in the first three layouts to resize their sections. Field containers scroll when necessary, preserving the complete field image and its meter scale.
 
+The 3.0 workspace removes the old fixed desktop minimum. Navigation scrolls without covering native window controls, panels stack at narrow widths, modal editors reflow vertically, and field canvases use contained scrolling. This keeps every control reachable across tall, ultrawide, compact, and unusual aspect ratios without cropping the field image.
+
 In Auto focus layout, drag the path tree by its toolbar, resize it from its corner handle, or minimize and restore it. The floating tree does not replace the live pose: live telemetry is rendered directly on the Auto maker field.
 
-### Themes
+### Themes and Custom Designs
 
 Open **Preferences** to choose one of ten presets. The modal keeps its header visible and scrolls its appearance content within the available window height:
 
@@ -347,7 +409,9 @@ Open **Preferences** to choose one of ten presets. The modal keeps its header vi
 - Graphite
 - High Contrast
 
-To create a personal theme, copy the current palette into **Custom theme**, give it a name, and edit its semantic colors. Theme changes apply immediately and save automatically. Voyager's ShadCN-style controls are implemented with Base UI rather than Radix.
+To create a personal theme, copy the current palette into **Custom theme**, give it a name, and edit its semantic colors. Theme changes apply immediately and save automatically.
+
+The **Custom Designs** tab provides five independently selectable interface systems: Precision Grid, Editorial Intelligence, Prism Console, Terminal Blocks, and README Minimal. These designs change font families, base type scale, navigation and control height, panel padding, corner radius, and elevation while keeping the chosen color theme independent. The adaptations preserve field scale, minimum interaction targets, modal scrolling, contrast roles, and responsive behavior. Voyager's ShadCN-style controls are implemented with Base UI rather than Radix.
 
 ## Notifications and activity history
 
@@ -383,7 +447,10 @@ It contains the global motion constraints and:
 - Waypoints with X/Y, heading, handoff radius, and profiled state.
 - Rotation targets with heading and path position.
 - Event triggers with command name and path position.
+- Event Zones as paired start/end event triggers.
 - Constraint-zone overrides with start/end positions.
+
+Project-only editor metadata, including obstacles and version history, is stored separately in `voyager/assets/metadata.json`; it is not added to robot-side path JSON.
 
 The complete tree is written as:
 
@@ -399,12 +466,14 @@ It contains each root autonomous routine and serializes its paths, events, true/
 2. Open **Settings** and select the WPILib project.
 3. Configure the field image, dimensions, and origin.
 4. Configure robot size, swerve geometry, and center of rotation.
-5. Configure constraints, tolerances, handoff radius, and translational/CTE/rotational PID gains.
+5. Configure constraints, tolerances, handoff radius, planner tuning, and translational/CTE/rotational PID gains.
 6. Apply the team number or NT4 address.
 7. Add and connect blocks in the path tree.
-8. Open each path for editing and place its waypoints, rotation targets, events, and constraint zones.
-9. Use **Playback** to inspect the simulated routine and estimated duration.
-10. Select a routine, choose **Save all paths**, connect to the robot, and press **Publish Routine**.
+8. Map measured obstacles, then draw waypoints manually or use **Plan path** to generate a safe route.
+9. Add rotation targets, events, event zones, and constraint zones.
+10. Mirror an alliance-side path when needed.
+11. Use **Playback** to inspect the simulated routine and estimated duration.
+12. Select a routine, choose **Save all paths**, connect to the robot, and press **Publish Routine** or enable publishing on connect.
 
 ## Development
 
@@ -441,8 +510,8 @@ npm run dist
 
 ```text
 release/
-|-- Voyager Setup 2.4.3.exe
-`-- Voyager 2.4.3.exe
+|-- Voyager Setup 3.1.1-alpha.exe
+`-- Voyager 3.1.1-alpha.exe
 ```
 
 Before publishing a release, update the version in `package.json`, build both packages, smoke-test the packaged app, update the release notes, and attach the executables to a GitHub Release.
@@ -456,7 +525,7 @@ Voyager/
 |-- src/                     React application and styles
 |-- electron.vite.config.ts  Electron/Vite build configuration
 |-- package.json             Scripts, dependencies, and packaging settings
-`-- RELEASE_NOTES_v2.4.3.md  Current release notes
+`-- RELEASE_NOTES_v3.1.1-alpha.md  Current release notes
 ```
 
 ### Technology
