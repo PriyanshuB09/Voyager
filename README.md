@@ -8,7 +8,7 @@
   A visual desktop autonomous builder for FIRST Robotics Competition teams.
 </p>
 
-Voyager lets an FRC team build an autonomous routine as a branching tree, draw and tune each path on a field, plan collision-free routes around measured obstacles, preview the robot's motion, save the complete workspace into a WPILib project, and publish the selected routine to the robot over NT4. This guide covers the Voyager 3.1.3-alpha workflow.
+Voyager lets an FRC team build an autonomous routine as a branching tree, draw and tune each path on a field, plan collision-free routes around measured obstacles, preview the robot's motion, save the complete workspace into a WPILib project, and publish the selected routine to the robot over NT4. This guide covers the Voyager 3.3.2-alpha workflow.
 
 ## Contents
 
@@ -36,8 +36,8 @@ Download Voyager from the repository's [GitHub Releases](https://github.com/Priy
 
 | Package | Best for |
 | --- | --- |
-| `Voyager Setup 3.1.3-alpha.exe` | Normal Windows installation |
-| `Voyager 3.1.3-alpha.exe` | Running Voyager without installing it |
+| `Voyager Setup 3.3.2-alpha.exe` | Normal Windows installation |
+| `Voyager 3.3.2-alpha.exe` | Running Voyager without installing it |
 
 The Windows packages are not digitally code-signed, so SmartScreen may show an **Unknown publisher** warning. Only run packages obtained from the official repository.
 
@@ -75,6 +75,7 @@ Voyager has three primary work areas and a top navigation bar.
 
 The top bar contains:
 
+- **Auto builder** and **Live robot** tabs, which keep editing and telemetry focused in separate workspaces.
 - **Save**, which opens a centered, background-blurring modal for path export, metadata saving, automatic saving, and publishing on robot connect.
 - **Version History**, which opens restorable snapshots of the full path tree and path collection.
 - **Obstacle Map**, a full-field measured obstacle editor used by the path planner.
@@ -102,9 +103,7 @@ The field keeps its configured aspect ratio. If a panel becomes narrower than it
 
 ### Live robot position
 
-In the first three layouts, this field displays the live NT4 robot pose, connection state, persistent autonomous trail, and **Publish Routine** button. When disconnected, the robot is shown at `(0,0)`.
-
-In Auto focus layout, there is no small picture-in-picture live field. The live robot pose and its white trail are drawn directly on the Auto maker field. The connection indicator and **Publish Routine** button move into the Auto maker toolbar.
+The **Live robot** tab displays the live NT4 robot pose, connection state, persistent trail, ChassisSpeeds diagnostics, and **Publish Routine** button. Its source sidebar discovers the server's announced topic hierarchy and lets each telemetry input be selected or entered manually. When disconnected, the robot is shown at `(0,0)`.
 
 ### Path tree
 
@@ -116,7 +115,7 @@ Open **Settings** before building the first routine.
 
 ### Field and project
 
-1. Use **Field image** to choose the field background.
+1. Use **Field image** to choose the field background. Voyager immediately opens the crop tool so scoreboards, borders, and whitespace can be removed before the optimized image is stored. **Tools → Crop field image** reopens the cropper later.
 2. Choose **Select robot code project** and select the WPILib project root. Voyager shows the derived deploy destination below the button.
 3. Enter the field **width** and **length** in meters.
 4. Choose the corner representing field origin `(0,0)`: bottom-left, bottom-right, top-left, or top-right.
@@ -312,13 +311,20 @@ The estimated total uses trapezoidal translational and rotational motion limits 
 
 ## Use live robot telemetry
 
-Voyager displays the robot's NT4 pose when connected. The live robot uses the same dimensions, center of rotation, wheel geometry, and field scale as the simulated robot. Its swerve modules respond to velocity inferred from consecutive live poses.
+Voyager displays the robot's NT4 pose in the **Live robot** tab when connected. The live robot uses the same dimensions, center of rotation, wheel geometry, and field scale as the simulated robot. Its swerve modules respond to velocity inferred from consecutive live poses.
 
-When a routine is published, Voyager begins a solid white pose trail at the current robot pose. The trail does not fade and remains visible throughout the autonomous routine.
+The default source topics are:
 
-- In default, horizontal, and mirrored layouts, the pose and trail appear in **Live robot position**.
-- In Auto focus layout, the live pose and trail are overlaid directly on the **Auto maker field**.
-- When disconnected, Voyager shows the live pose at `(0,0)` and labels the connection as offline.
+```text
+/AdvantageKit/DriverStation/DSAttached
+/AdvantageKit/RealOutputs/Odometry/Robot
+```
+
+Two optional source selectors accept measured and setpoint WPILib `ChassisSpeeds` values. Voyager decodes raw structs, numeric arrays, JSON objects, and JSON arrays. On the field, a solid cyan vector shows measured translation and rotation while a dashed pink vector shows the setpoint; straight arrows encode robot-relative `vx`/`vy`, and signed arc arrows encode the magnitude and direction of `omega`. Matching color-keyed cards below the field display both sources' live values. When measured motion remains substantially below or different from the setpoint, Voyager flags a possible collision or wheel slip after a short debounce. The robot perimeter and the affected trail segments turn red until measured motion recovers.
+
+Choose **Direct client** for Voyager's compact native NT4 adapter or **FRC Web Components** for compatibility with teams whose servers work best with that implementation. Both transports discover all announced topics but subscribe to values only for the configured sources.
+
+When a routine is published, Voyager begins a persistent pose trail at the current robot pose. When disconnected, Voyager shows the live pose at `(0,0)` and labels the connection as offline.
 
 The playback robot and live robot are separate overlays: playback visualizes the planned path, while the live pose represents robot telemetry.
 
@@ -510,8 +516,8 @@ npm run dist
 
 ```text
 release/
-|-- Voyager Setup 3.1.3-alpha.exe
-`-- Voyager 3.1.3-alpha.exe
+|-- Voyager Setup 3.3.2-alpha.exe
+`-- Voyager 3.3.2-alpha.exe
 ```
 
 Before publishing a release, update the version in `package.json`, build both packages, smoke-test the packaged app, update the release notes, and attach the executables to a GitHub Release.
@@ -525,7 +531,8 @@ Voyager/
 |-- src/                     React application and styles
 |-- electron.vite.config.ts  Electron/Vite build configuration
 |-- package.json             Scripts, dependencies, and packaging settings
-`-- RELEASE_NOTES_v3.1.3-alpha.md  Current release notes
+|-- RELEASE_NOTES_v3.3.2-alpha.md  Current release notes
+`-- QUALITY_AUDIT_v3.3.2-alpha.md   Pass-by-pass release scores
 ```
 
 ### Technology

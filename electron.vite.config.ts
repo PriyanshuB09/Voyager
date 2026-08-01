@@ -34,6 +34,8 @@ export default defineConfig({
       },
     },
     build: {
+      minify: "esbuild",
+      cssMinify: "esbuild",
       rollupOptions: {
         input: resolve(__dirname, "index.html"),
       },

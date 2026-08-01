@@ -1,15 +1,19 @@
-import { useEntry } from "@frc-web-components/react";
 import {
+  Activity,
   AlertTriangle,
   Boxes,
+  Crop,
   Eye,
   EyeOff,
   GitBranch,
   History,
   LocateFixed,
+  Menu,
   Palette,
   Plus,
   Route,
+  Save as SaveIcon,
+  Settings as SettingsIcon,
   Sparkles,
   Trash2,
 } from "lucide-react";
@@ -43,6 +47,16 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  DEFAULT_TELEMETRY_CONFIGURATION,
+  useLiveTelemetry,
+} from "@/telemetry";
+import type {
+  ChassisSpeeds,
+  TelemetryConfiguration,
+  TelemetryTopicInfo,
+  TelemetryTransport,
+} from "@/telemetry";
 import "./styles/style.css";
 
 type OriginCorner = "bl" | "br" | "tl" | "tr";
@@ -51,6 +65,7 @@ type TreeKind = "path" | "if" | "loop" | "interrupt" | "event";
 type ChildSlot = "next" | "true" | "false" | "forloop" | "interruptable";
 type SaveStatusKind = "idle" | "saving" | "saved" | "error";
 type LayoutMode = "default" | "horizontal" | "mirrored" | "focus";
+type WorkspaceTab = "auto" | "live";
 type PlannerLevel = 0 | 1 | 2 | 3 | 4;
 type DesignPresetId = "precision-grid" | "editorial-intelligence" | "prism-console" | "terminal-blocks" | "readme-minimal";
 type PreferencesTab = "themes" | "designs";
@@ -118,12 +133,6 @@ interface AppProps {
   setNt4Address: (address: string) => void;
 }
 
-interface Pose2d {
-  x: number;
-  y: number;
-  rotation: number;
-}
-
 interface Settings {
   fieldImageDataUrl: string | null;
   robotCodeProjectFolder: string | null;
@@ -166,6 +175,11 @@ interface Settings {
   designPreset: DesignPresetId;
   showObstacleZones: boolean;
   showHandoffRadii: boolean;
+  telemetryTransport: TelemetryTransport;
+  driverStationTopic: string;
+  odometryTopic: string;
+  measuredChassisSpeedsTopic: string | null;
+  setpointChassisSpeedsTopic: string | null;
 }
 
 interface FieldObstacle {
@@ -496,10 +510,12 @@ const DB_NAME = "voyager-autonomous-builder";
 const DB_VERSION = 1;
 const DB_STORE = "kv";
 const APP_STATE_KEY = "app-state";
-const VOYAGER_VERSION = "3.1.3-alpha";
+const VOYAGER_VERSION = "3.3.2-alpha";
 const PROJECT_METADATA_FILE = "metadata.json";
 const NODE_WIDTH = 160;
 const NODE_HEIGHT = 62;
+const ACTIVITY_LOG_LIMIT = 200;
+const LOCAL_PERSIST_DELAY_MS = 800;
 
 type TreeNodeSide = "left" | "right" | "top" | "bottom";
 
@@ -570,9 +586,9 @@ function nearestTreeEdgeGeometry(parent: PathTreeNode, child: PathTreeNode): Tre
 const THEME_PRESETS: ThemePreset[] = [
   {
     id: "voyager",
-    name: "Voyager Core",
-    description: "The familiar teal and cyan command-center palette.",
-    palette: { background: "#090d14", panel: "#0f1521", panel2: "#121a2a", panel3: "#172033", text: "#e5ecf7", muted: "#94a3b8", faint: "#64748b", accent: "#5eead4", accent2: "#38bdf8", border: "#263447", borderStrong: "#52647b", warn: "#facc15", danger: "#fb7185", success: "#86efac" },
+    name: "Pathfinder",
+    description: "Calm graphite surfaces with a focused periwinkle accent.",
+    palette: { background: "#17181c", panel: "#202228", panel2: "#272a31", panel3: "#30343c", text: "#f2f3f5", muted: "#b4bac4", faint: "#7d8592", accent: "#8aa4ff", accent2: "#6f8cff", border: "#363a43", borderStrong: "#505661", warn: "#e5b95c", danger: "#ef7d8d", success: "#6fcf97" },
   },
   {
     id: "neural-violet",
@@ -633,21 +649,21 @@ const DEFAULT_THEME = THEME_PRESETS[0];
 const DESIGN_PRESETS: DesignPreset[] = [
   {
     id: "precision-grid",
-    name: "Precision Grid",
-    source: "Vercel-inspired DESIGN.md",
-    description: "Tight geometric type, four-pixel rhythm, restrained elevation, and compact six-pixel controls.",
-    bodyFont: "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif",
-    displayFont: "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif",
-    monoFont: "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
-    baseFontSize: "13px",
-    navHeight: "52px",
-    controlHeight: "32px",
-    panelPadding: "12px",
+    name: "PathPlanner Calm",
+    source: "PathPlanner-inspired workspace",
+    description: "Readable system type, clear editor hierarchy, restrained color, and comfortable controls.",
+    bodyFont: "'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif",
+    displayFont: "'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, sans-serif",
+    monoFont: "'Cascadia Code', 'SFMono-Regular', Consolas, monospace",
+    baseFontSize: "15px",
+    navHeight: "56px",
+    controlHeight: "38px",
+    panelPadding: "16px",
     radiusSmall: "6px",
     radiusMedium: "8px",
-    radiusLarge: "12px",
+    radiusLarge: "10px",
     buttonRadius: "6px",
-    shadow: "0 10px 32px rgba(0, 0, 0, 0.2)",
+    shadow: "0 14px 36px rgba(0, 0, 0, 0.24)",
   },
   {
     id: "editorial-intelligence",
@@ -779,6 +795,11 @@ const DEFAULT_SETTINGS: Settings = {
   designPreset: DEFAULT_DESIGN.id,
   showObstacleZones: true,
   showHandoffRadii: true,
+  telemetryTransport: DEFAULT_TELEMETRY_CONFIGURATION.transport,
+  driverStationTopic: DEFAULT_TELEMETRY_CONFIGURATION.driverStationTopic,
+  odometryTopic: DEFAULT_TELEMETRY_CONFIGURATION.odometryTopic,
+  measuredChassisSpeedsTopic: DEFAULT_TELEMETRY_CONFIGURATION.measuredChassisSpeedsTopic,
+  setpointChassisSpeedsTopic: DEFAULT_TELEMETRY_CONFIGURATION.setpointChassisSpeedsTopic,
 };
 
 function createId(prefix: string): string {
@@ -798,6 +819,40 @@ function cleanNumber(value: number, fallback: number): number {
 
 function safePositive(value: number, fallback: number): number {
   return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function maxHandoffRadiusMeters(fieldLengthMeters: number, fieldWidthMeters: number): number {
+  return Math.max(0.01, Math.min(
+    safePositive(fieldLengthMeters, DEFAULT_SETTINGS.fieldLengthMeters),
+    safePositive(fieldWidthMeters, DEFAULT_SETTINGS.fieldWidthMeters),
+  ) / 2);
+}
+
+function stabilizeSettings(settings: Settings): Settings {
+  const fieldLengthMeters = clamp(safePositive(Number(settings.fieldLengthMeters), DEFAULT_SETTINGS.fieldLengthMeters), 0.1, 100);
+  const fieldWidthMeters = clamp(safePositive(Number(settings.fieldWidthMeters), DEFAULT_SETTINGS.fieldWidthMeters), 0.1, 100);
+  const robotLengthMeters = clamp(safePositive(Number(settings.robotLengthMeters), DEFAULT_SETTINGS.robotLengthMeters), 0.05, fieldLengthMeters);
+  const robotWidthMeters = clamp(safePositive(Number(settings.robotWidthMeters), DEFAULT_SETTINGS.robotWidthMeters), 0.05, fieldWidthMeters);
+  return {
+    ...settings,
+    fieldLengthMeters,
+    fieldWidthMeters,
+    robotLengthMeters,
+    robotWidthMeters,
+    swerveWheelLengthMeters: clamp(safePositive(Number(settings.swerveWheelLengthMeters), DEFAULT_SETTINGS.swerveWheelLengthMeters), 0.01, robotLengthMeters),
+    swerveWheelWidthMeters: clamp(safePositive(Number(settings.swerveWheelWidthMeters), DEFAULT_SETTINGS.swerveWheelWidthMeters), 0.005, robotWidthMeters),
+    swerveModuleOffsetXMeters: clamp(cleanNumber(Number(settings.swerveModuleOffsetXMeters), DEFAULT_SETTINGS.swerveModuleOffsetXMeters), 0, robotLengthMeters / 2),
+    swerveModuleOffsetYMeters: clamp(cleanNumber(Number(settings.swerveModuleOffsetYMeters), DEFAULT_SETTINGS.swerveModuleOffsetYMeters), 0, robotWidthMeters / 2),
+    centerOfRotationX: clamp(cleanNumber(Number(settings.centerOfRotationX), robotLengthMeters / 2), 0, robotLengthMeters),
+    centerOfRotationY: clamp(cleanNumber(Number(settings.centerOfRotationY), robotWidthMeters / 2), 0, robotWidthMeters),
+    defaultIntermediateHandOffRadiusMeters: clamp(safePositive(Number(settings.defaultIntermediateHandOffRadiusMeters), DEFAULT_SETTINGS.defaultIntermediateHandOffRadiusMeters), 0.01, maxHandoffRadiusMeters(fieldLengthMeters, fieldWidthMeters)),
+    maxTranslationalVelocity: safePositive(Number(settings.maxTranslationalVelocity), DEFAULT_SETTINGS.maxTranslationalVelocity),
+    maxTranslationalAcceleration: safePositive(Number(settings.maxTranslationalAcceleration), DEFAULT_SETTINGS.maxTranslationalAcceleration),
+    maxRotationalVelocity: safePositive(Number(settings.maxRotationalVelocity), DEFAULT_SETTINGS.maxRotationalVelocity),
+    maxRotationalAcceleration: safePositive(Number(settings.maxRotationalAcceleration), DEFAULT_SETTINGS.maxRotationalAcceleration),
+    endTranslationToleranceMeters: safePositive(Number(settings.endTranslationToleranceMeters), DEFAULT_SETTINGS.endTranslationToleranceMeters),
+    endRotationToleranceDegrees: safePositive(Number(settings.endRotationToleranceDegrees), DEFAULT_SETTINGS.endRotationToleranceDegrees),
+  };
 }
 
 function formatNumber(value: number, digits = 2): string {
@@ -850,26 +905,11 @@ function describeNt4Address(address: string): string {
   return address;
 }
 
-function parsePose2d(data: Uint8Array): Pose2d {
-  if (!(data instanceof Uint8Array)) {
-    console.warn("parsePose2d: Expected Uint8Array input.");
-    return { x: 0, y: 0, rotation: 0 };
-  }
-
-  if (data.byteLength < 24) {
-    console.warn(`parsePose2d: Invalid length (${data.byteLength}). Expected 24 bytes.`);
-    return { x: 0, y: 0, rotation: 0 };
-  }
-
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  const x = view.getFloat64(0, true);
-  const y = view.getFloat64(8, true);
-  const rotation = view.getFloat64(16, true);
-  return { x, y, rotation };
-}
+let databasePromise: Promise<IDBDatabase> | null = null;
 
 function openDatabase(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
+  if (databasePromise) return databasePromise;
+  databasePromise = new Promise((resolve, reject) => {
     if (!globalThis.indexedDB) {
       reject(new Error("IndexedDB is not available in this runtime."));
       return;
@@ -880,9 +920,19 @@ function openDatabase(): Promise<IDBDatabase> {
       const db = request.result;
       if (!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE);
     };
-    request.onerror = () => reject(request.error ?? new Error("Failed to open IndexedDB."));
-    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => {
+      databasePromise = null;
+      reject(request.error ?? new Error("Failed to open IndexedDB."));
+    };
+    request.onsuccess = () => {
+      request.result.onversionchange = () => {
+        request.result.close();
+        databasePromise = null;
+      };
+      resolve(request.result);
+    };
   });
+  return databasePromise;
 }
 
 async function idbGet<T>(key: string): Promise<T | null> {
@@ -893,11 +943,7 @@ async function idbGet<T>(key: string): Promise<T | null> {
     const request = store.get(key);
     request.onerror = () => reject(request.error ?? new Error("Failed to read IndexedDB value."));
     request.onsuccess = () => resolve((request.result as T | undefined) ?? null);
-    tx.oncomplete = () => db.close();
-    tx.onerror = () => {
-      db.close();
-      reject(tx.error ?? new Error("IndexedDB transaction failed."));
-    };
+    tx.onerror = () => reject(tx.error ?? new Error("IndexedDB transaction failed."));
   });
 }
 
@@ -908,14 +954,8 @@ async function idbSet<T>(key: string, value: T): Promise<void> {
     const store = tx.objectStore(DB_STORE);
     const request = store.put(value, key);
     request.onerror = () => reject(request.error ?? new Error("Failed to write IndexedDB value."));
-    tx.oncomplete = () => {
-      db.close();
-      resolve();
-    };
-    tx.onerror = () => {
-      db.close();
-      reject(tx.error ?? new Error("IndexedDB transaction failed."));
-    };
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error ?? new Error("IndexedDB transaction failed."));
   });
 }
 
@@ -1274,8 +1314,14 @@ function cloneWaypointAsPathStart(waypoint: Waypoint): Waypoint {
 }
 
 function sanitizeFileName(name: string): string {
-  const cleaned = name.trim().replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").replace(/\s+/g, "_");
-  return cleaned.length > 0 ? cleaned : "Unnamed_Path";
+  const cleaned = name.trim()
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
+    .replace(/\s+/g, "_")
+    .replace(/[. ]+$/g, "")
+    .slice(0, 120);
+  if (!cleaned) return "Unnamed_Path";
+  const stem = cleaned.split(".")[0].toUpperCase();
+  return /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/.test(stem) ? `_${cleaned}` : cleaned;
 }
 
 function getVoyagerDeployFolder(projectFolder: string): string {
@@ -1992,13 +2038,23 @@ function robotRenderStyle(settings: Settings, size: FieldSize, x: number, y: num
   };
 }
 
+function applyRobotRenderStyle(element: HTMLElement, style: CSSProperties): void {
+  element.style.width = String(style.width ?? "");
+  element.style.height = String(style.height ?? "");
+  element.style.left = String(style.left ?? "");
+  element.style.top = String(style.top ?? "");
+  element.style.transform = String(style.transform ?? "");
+  element.style.transformOrigin = String(style.transformOrigin ?? "");
+}
+
 function handoffCircleStyle(settings: Settings, size: FieldSize, waypoint: Waypoint): CSSProperties {
   const center = pointToPixels(settings, size, waypoint);
   const pixelsPerMeter = Math.max(0, Math.min(
     size.width / safePositive(settings.fieldLengthMeters, DEFAULT_SETTINGS.fieldLengthMeters),
     size.height / safePositive(settings.fieldWidthMeters, DEFAULT_SETTINGS.fieldWidthMeters),
   ));
-  const diameter = Math.max(8, waypoint.handoff * 2 * pixelsPerMeter);
+  const radius = clamp(safePositive(waypoint.handoff, settings.defaultIntermediateHandOffRadiusMeters), 0.01, maxHandoffRadiusMeters(settings.fieldLengthMeters, settings.fieldWidthMeters));
+  const diameter = Math.max(8, radius * 2 * pixelsPerMeter);
   return {
     width: `${diameter}px`,
     height: `${diameter}px`,
@@ -2118,48 +2174,239 @@ function serializeAutoConfig(nodes: PathTreeNode[]): SerializedAutoConfig {
 
 function normalizePersistedState(value: PersistedAppState | null): PersistedAppState | null {
   if (!value || typeof value !== "object") return null;
-  const normalizePath = (path: Partial<SharedPathData> | null | undefined): SharedPathData => ({
-    waypoints: Array.isArray(path?.waypoints) ? path.waypoints : [],
-    rotationTargets: Array.isArray(path?.rotationTargets) ? path.rotationTargets : [],
-    events: Array.isArray(path?.events) ? path.events : [],
-    eventZones: Array.isArray(path?.eventZones) ? path.eventZones : [],
-    constraintZones: Array.isArray(path?.constraintZones) ? path.constraintZones : [],
-  });
+  const storedSettings = value.settings && typeof value.settings === "object" ? value.settings : DEFAULT_SETTINGS;
+  const fieldLengthMeters = clamp(safePositive(Number(storedSettings.fieldLengthMeters), DEFAULT_SETTINGS.fieldLengthMeters), 0.1, 100);
+  const fieldWidthMeters = clamp(safePositive(Number(storedSettings.fieldWidthMeters), DEFAULT_SETTINGS.fieldWidthMeters), 0.1, 100);
+  const maximumHandoffRadius = maxHandoffRadiusMeters(fieldLengthMeters, fieldWidthMeters);
+  const robotLengthMeters = clamp(safePositive(Number(storedSettings.robotLengthMeters), DEFAULT_SETTINGS.robotLengthMeters), 0.05, fieldLengthMeters);
+  const robotWidthMeters = clamp(safePositive(Number(storedSettings.robotWidthMeters), DEFAULT_SETTINGS.robotWidthMeters), 0.05, fieldWidthMeters);
+  const customTheme = Object.fromEntries(Object.entries(DEFAULT_SETTINGS.customTheme).map(([key, fallback]) => {
+    const candidate = storedSettings.customTheme?.[key as keyof ThemePalette];
+    return [key, typeof candidate === "string" && /^#[0-9a-f]{6}$/i.test(candidate) ? candidate : fallback];
+  })) as unknown as ThemePalette;
+  const normalizedSettings: Settings = stabilizeSettings({
+      ...DEFAULT_SETTINGS,
+      ...storedSettings,
+      fieldImageDataUrl: typeof storedSettings.fieldImageDataUrl === "string" ? storedSettings.fieldImageDataUrl : null,
+      robotCodeProjectFolder: typeof storedSettings.robotCodeProjectFolder === "string" ? storedSettings.robotCodeProjectFolder : null,
+      fieldLengthMeters,
+      fieldWidthMeters,
+      robotLengthMeters,
+      robotWidthMeters,
+      swerveWheelLengthMeters: clamp(safePositive(Number(storedSettings.swerveWheelLengthMeters), DEFAULT_SETTINGS.swerveWheelLengthMeters), 0.01, robotLengthMeters),
+      swerveWheelWidthMeters: clamp(safePositive(Number(storedSettings.swerveWheelWidthMeters), DEFAULT_SETTINGS.swerveWheelWidthMeters), 0.005, robotWidthMeters),
+      swerveModuleOffsetXMeters: clamp(cleanNumber(Number(storedSettings.swerveModuleOffsetXMeters), DEFAULT_SETTINGS.swerveModuleOffsetXMeters), 0, robotLengthMeters / 2),
+      swerveModuleOffsetYMeters: clamp(cleanNumber(Number(storedSettings.swerveModuleOffsetYMeters), DEFAULT_SETTINGS.swerveModuleOffsetYMeters), 0, robotWidthMeters / 2),
+      centerOfRotationX: clamp(cleanNumber(Number(storedSettings.centerOfRotationX), robotLengthMeters / 2), 0, robotLengthMeters),
+      centerOfRotationY: clamp(cleanNumber(Number(storedSettings.centerOfRotationY), robotWidthMeters / 2), 0, robotWidthMeters),
+      originCorner: (["bl", "br", "tl", "tr"] as OriginCorner[]).includes(storedSettings.originCorner) ? storedSettings.originCorner : DEFAULT_SETTINGS.originCorner,
+      maxTranslationalVelocity: safePositive(Number(storedSettings.maxTranslationalVelocity), DEFAULT_SETTINGS.maxTranslationalVelocity),
+      maxTranslationalAcceleration: safePositive(Number(storedSettings.maxTranslationalAcceleration), DEFAULT_SETTINGS.maxTranslationalAcceleration),
+      maxRotationalVelocity: safePositive(Number(storedSettings.maxRotationalVelocity), DEFAULT_SETTINGS.maxRotationalVelocity),
+      maxRotationalAcceleration: safePositive(Number(storedSettings.maxRotationalAcceleration), DEFAULT_SETTINGS.maxRotationalAcceleration),
+      endTranslationToleranceMeters: safePositive(Number(storedSettings.endTranslationToleranceMeters), DEFAULT_SETTINGS.endTranslationToleranceMeters),
+      endRotationToleranceDegrees: safePositive(Number(storedSettings.endRotationToleranceDegrees), DEFAULT_SETTINGS.endRotationToleranceDegrees),
+      defaultIntermediateHandOffRadiusMeters: clamp(safePositive(Number(storedSettings.defaultIntermediateHandOffRadiusMeters), DEFAULT_SETTINGS.defaultIntermediateHandOffRadiusMeters), 0.01, maximumHandoffRadius),
+      translationalControllerP: cleanNumber(Number(storedSettings.translationalControllerP), DEFAULT_SETTINGS.translationalControllerP),
+      translationalControllerI: cleanNumber(Number(storedSettings.translationalControllerI), DEFAULT_SETTINGS.translationalControllerI),
+      translationalControllerD: cleanNumber(Number(storedSettings.translationalControllerD), DEFAULT_SETTINGS.translationalControllerD),
+      cteControllerP: cleanNumber(Number(storedSettings.cteControllerP), DEFAULT_SETTINGS.cteControllerP),
+      cteControllerI: cleanNumber(Number(storedSettings.cteControllerI), DEFAULT_SETTINGS.cteControllerI),
+      cteControllerD: cleanNumber(Number(storedSettings.cteControllerD), DEFAULT_SETTINGS.cteControllerD),
+      rotationalControllerP: cleanNumber(Number(storedSettings.rotationalControllerP), DEFAULT_SETTINGS.rotationalControllerP),
+      rotationalControllerI: cleanNumber(Number(storedSettings.rotationalControllerI), DEFAULT_SETTINGS.rotationalControllerI),
+      rotationalControllerD: cleanNumber(Number(storedSettings.rotationalControllerD), DEFAULT_SETTINGS.rotationalControllerD),
+      layoutMode: (["default", "horizontal", "mirrored", "focus"] as LayoutMode[]).includes(storedSettings.layoutMode) ? storedSettings.layoutMode : DEFAULT_SETTINGS.layoutMode,
+      themePreset: storedSettings.themePreset === "custom" || THEME_PRESETS.some((preset) => preset.id === storedSettings.themePreset)
+        ? storedSettings.themePreset
+        : DEFAULT_SETTINGS.themePreset,
+      customThemeName: typeof storedSettings.customThemeName === "string" && storedSettings.customThemeName.trim()
+        ? storedSettings.customThemeName.slice(0, 80)
+        : DEFAULT_SETTINGS.customThemeName,
+      customTheme,
+      autoSave: Boolean(storedSettings.autoSave),
+      autoSaveMetadata: Boolean(storedSettings.autoSaveMetadata),
+      autoPublishOnConnect: Boolean(storedSettings.autoPublishOnConnect),
+      plannerWaypointDensity: normalizePlannerLevel(storedSettings.plannerWaypointDensity),
+      plannerSharpness: normalizePlannerLevel(storedSettings.plannerSharpness),
+      designPreset: DESIGN_PRESETS.some((preset) => preset.id === storedSettings.designPreset)
+        ? storedSettings.designPreset
+        : DEFAULT_DESIGN.id,
+      showObstacleZones: typeof storedSettings.showObstacleZones === "boolean"
+        ? storedSettings.showObstacleZones
+        : DEFAULT_SETTINGS.showObstacleZones,
+      showHandoffRadii: typeof storedSettings.showHandoffRadii === "boolean"
+        ? storedSettings.showHandoffRadii
+        : DEFAULT_SETTINGS.showHandoffRadii,
+      telemetryTransport: storedSettings.telemetryTransport === "frc-web-components"
+        ? "frc-web-components"
+        : "direct",
+      driverStationTopic: typeof storedSettings.driverStationTopic === "string" && storedSettings.driverStationTopic.trim()
+        ? storedSettings.driverStationTopic
+        : DEFAULT_SETTINGS.driverStationTopic,
+      odometryTopic: typeof storedSettings.odometryTopic === "string" && storedSettings.odometryTopic.trim()
+        ? storedSettings.odometryTopic
+        : DEFAULT_SETTINGS.odometryTopic,
+      measuredChassisSpeedsTopic: typeof storedSettings.measuredChassisSpeedsTopic === "string" && storedSettings.measuredChassisSpeedsTopic.trim()
+        ? storedSettings.measuredChassisSpeedsTopic
+        : null,
+      setpointChassisSpeedsTopic: typeof storedSettings.setpointChassisSpeedsTopic === "string" && storedSettings.setpointChassisSpeedsTopic.trim()
+        ? storedSettings.setpointChassisSpeedsTopic
+        : null,
+    });
+  const normalizeId = (candidate: unknown, prefix: string, seen: Set<string>): string => {
+    const requested = typeof candidate === "string" && candidate.trim() ? candidate : createId(prefix);
+    const id = seen.has(requested) ? createId(prefix) : requested;
+    seen.add(id);
+    return id;
+  };
+  const normalizePath = (path: Partial<SharedPathData> | null | undefined): SharedPathData => {
+    const waypointIds = new Set<string>();
+    const waypoints = (Array.isArray(path?.waypoints) ? path.waypoints : []).filter((waypoint) => waypoint && typeof waypoint === "object").map((waypoint) => ({
+      id: normalizeId(waypoint.id, "waypoint", waypointIds),
+      x: clamp(cleanNumber(Number(waypoint.x), fieldLengthMeters / 2), 0, fieldLengthMeters),
+      y: clamp(cleanNumber(Number(waypoint.y), fieldWidthMeters / 2), 0, fieldWidthMeters),
+      angle: normalizeCompassDegrees(cleanNumber(Number(waypoint.angle), 0)),
+      handoff: clamp(safePositive(Number(waypoint.handoff), normalizedSettings.defaultIntermediateHandOffRadiusMeters), 0.01, maximumHandoffRadius),
+      profiled: typeof waypoint.profiled === "boolean" ? waypoint.profiled : true,
+    }));
+    const maxPositionValue = Math.max(0, waypoints.length - 1);
+    const rotationIds = new Set<string>();
+    const eventIds = new Set<string>();
+    const eventZoneIds = new Set<string>();
+    const constraintIds = new Set<string>();
+    return {
+      waypoints,
+      rotationTargets: (Array.isArray(path?.rotationTargets) ? path.rotationTargets : []).filter((target) => target && typeof target === "object").map((target) => ({
+        id: normalizeId(target.id, "rotation_target", rotationIds),
+        angle: normalizeCompassDegrees(cleanNumber(Number(target.angle), 0)),
+        position: clamp(cleanNumber(Number(target.position), 0), 0, maxPositionValue),
+        profiled: typeof target.profiled === "boolean" ? target.profiled : true,
+      })),
+      events: (Array.isArray(path?.events) ? path.events : []).filter((event) => event && typeof event === "object").map((event) => ({
+        id: normalizeId(event.id, "event", eventIds),
+        name: typeof event.name === "string" && event.name.trim() ? event.name.trim().slice(0, 120) : "event",
+        position: clamp(cleanNumber(Number(event.position), 0), 0, maxPositionValue),
+      })),
+      eventZones: (Array.isArray(path?.eventZones) ? path.eventZones : []).filter((zone) => zone && typeof zone === "object").map((zone) => {
+        const startPosition = clamp(cleanNumber(Number(zone.startPosition), 0), 0, maxPositionValue);
+        const endPosition = clamp(cleanNumber(Number(zone.endPosition), startPosition), 0, maxPositionValue);
+        return {
+          id: normalizeId(zone.id, "event_zone", eventZoneIds),
+          startName: typeof zone.startName === "string" && zone.startName.trim() ? zone.startName.trim().slice(0, 120) : "start_event",
+          endName: typeof zone.endName === "string" && zone.endName.trim() ? zone.endName.trim().slice(0, 120) : "end_event",
+          startPosition: Math.min(startPosition, endPosition),
+          endPosition: Math.max(startPosition, endPosition),
+        };
+      }),
+      constraintZones: (Array.isArray(path?.constraintZones) ? path.constraintZones : []).filter((zone) => zone && typeof zone === "object").map((zone) => {
+        const startPosition = clamp(cleanNumber(Number(zone.startPosition), 0), 0, maxPositionValue);
+        const endPosition = clamp(cleanNumber(Number(zone.endPosition), startPosition), 0, maxPositionValue);
+        return {
+          id: normalizeId(zone.id, "constraint", constraintIds),
+          maxTranslationalVelocity: safePositive(Number(zone.maxTranslationalVelocity), normalizedSettings.maxTranslationalVelocity),
+          maxTranslationalAcceleration: safePositive(Number(zone.maxTranslationalAcceleration), normalizedSettings.maxTranslationalAcceleration),
+          maxRotationalVelocity: safePositive(Number(zone.maxRotationalVelocity), normalizedSettings.maxRotationalVelocity),
+          maxRotationalAcceleration: safePositive(Number(zone.maxRotationalAcceleration), normalizedSettings.maxRotationalAcceleration),
+          startPosition: Math.min(startPosition, endPosition),
+          endPosition: Math.max(startPosition, endPosition),
+        };
+      }),
+    };
+  };
   const pathDataByName = value.pathDataByName && typeof value.pathDataByName === "object"
     ? Object.fromEntries(Object.entries(value.pathDataByName).map(([name, path]) => [name, normalizePath(path)]))
     : {};
-  const normalizedSettings: Settings = {
-      ...DEFAULT_SETTINGS,
-      ...value.settings,
-      customTheme: { ...DEFAULT_SETTINGS.customTheme, ...value.settings?.customTheme },
-      plannerWaypointDensity: normalizePlannerLevel(value.settings?.plannerWaypointDensity),
-      plannerSharpness: normalizePlannerLevel(value.settings?.plannerSharpness),
-      designPreset: DESIGN_PRESETS.some((preset) => preset.id === value.settings?.designPreset)
-        ? value.settings.designPreset
-        : DEFAULT_DESIGN.id,
-      showObstacleZones: typeof value.settings?.showObstacleZones === "boolean"
-        ? value.settings.showObstacleZones
-        : DEFAULT_SETTINGS.showObstacleZones,
-      showHandoffRadii: typeof value.settings?.showHandoffRadii === "boolean"
-        ? value.settings.showHandoffRadii
-        : DEFAULT_SETTINGS.showHandoffRadii,
+  const normalizeTreeNodes = (nodes: unknown): PathTreeNode[] => {
+    if (!Array.isArray(nodes)) return [];
+    const validKinds = new Set<TreeKind>(["path", "if", "loop", "interrupt", "event"]);
+    const seenIds = new Set<string>();
+    const oldToNewId = new Map<string, string>();
+    const candidates = nodes.filter((node): node is PathTreeNode => Boolean(
+      node
+      && typeof node === "object"
+      && validKinds.has((node as Partial<PathTreeNode>).kind as TreeKind),
+    ));
+    const bases = candidates.map((node, index) => {
+      const originalId = typeof node.id === "string" ? node.id : "";
+      const id = normalizeId(originalId, "node", seenIds);
+      if (originalId && !oldToNewId.has(originalId)) oldToNewId.set(originalId, id);
+      return {
+        source: node,
+        id,
+        kind: node.kind,
+        name: typeof node.name === "string" && node.name.trim() ? node.name.trim().slice(0, 120) : defaultNameForKind(node.kind, []),
+        x: cleanNumber(Number(node.x), 120 + (index % 4) * 190),
+        y: cleanNumber(Number(node.y), 90 + Math.floor(index / 4) * 100),
+        selectedForRoutine: Boolean(node.selectedForRoutine),
+        editing: Boolean(node.editing),
+      };
+    });
+    const validIds = new Set(bases.map((node) => node.id));
+    const reference = (candidate: unknown, selfId: string): string | null => {
+      if (typeof candidate !== "string") return null;
+      const mapped = oldToNewId.get(candidate) ?? candidate;
+      return mapped !== selfId && validIds.has(mapped) ? mapped : null;
     };
+    return bases.map(({ source, ...base }): PathTreeNode => {
+      const shared = { ...base, parentId: reference(source.parentId, base.id) };
+      if (base.kind === "if") return {
+        ...shared,
+        kind: "if",
+        trueId: reference((source as PathTreeIfNode).trueId, base.id),
+        falseId: reference((source as PathTreeIfNode).falseId, base.id),
+        nextId: reference(source.nextId, base.id),
+      };
+      if (base.kind === "loop") return {
+        ...shared,
+        kind: "loop",
+        forloopId: reference((source as PathTreeLoopNode).forloopId, base.id),
+        nextId: reference(source.nextId, base.id),
+      };
+      if (base.kind === "interrupt") return {
+        ...shared,
+        kind: "interrupt",
+        interruptableId: reference((source as PathTreeInterruptNode).interruptableId, base.id),
+        nextId: reference(source.nextId, base.id),
+      };
+      return { ...shared, kind: base.kind, nextId: reference(source.nextId, base.id) } as PathTreePathNode | PathTreeEventNode;
+    });
+  };
+  const treeNodes = normalizeTreeNodes(value.treeNodes);
+  const treeNodeIds = new Set(treeNodes.map((node) => node.id));
+  const activePathNodeId = typeof value.activePathNodeId === "string"
+    && treeNodes.some((node) => node.id === value.activePathNodeId && node.kind === "path")
+    ? value.activePathNodeId
+    : null;
   return {
     settings: normalizedSettings,
-    treeNodes: Array.isArray(value.treeNodes) ? value.treeNodes : [],
+    treeNodes,
     pathDataByName,
-    knownPathFileNames: Array.isArray(value.knownPathFileNames) ? value.knownPathFileNames.filter((name): name is string => typeof name === "string") : [],
-    activePathNodeId: value.activePathNodeId ?? null,
-    pan: value.pan ?? { x: 0, y: 0 },
+    knownPathFileNames: Array.isArray(value.knownPathFileNames)
+      ? value.knownPathFileNames.filter((name): name is string => typeof name === "string" && Boolean(name.trim())).map((name) => name.trim().slice(0, 120))
+      : [],
+    activePathNodeId,
+    pan: {
+      x: cleanNumber(Number(value.pan?.x), 0),
+      y: cleanNumber(Number(value.pan?.y), 0),
+    },
     obstacles: Array.isArray(value.obstacles) ? value.obstacles.map((obstacle, index) => normalizeObstacle(obstacle, index, normalizedSettings)) : [],
-    activityLog: Array.isArray(value.activityLog) ? value.activityLog.filter((entry) => entry && typeof entry.id === "string" && typeof entry.message === "string" && Number.isFinite(entry.timestamp)) : [],
-    selectedTreeNodeId: typeof value.selectedTreeNodeId === "string" ? value.selectedTreeNodeId : null,
-    treeModalRect: value.treeModalRect ?? { x: 420, y: 18, width: 520, height: 520 },
+    activityLog: Array.isArray(value.activityLog) ? value.activityLog.filter((entry) => entry && typeof entry.id === "string" && typeof entry.message === "string" && Number.isFinite(entry.timestamp) && (["idle", "saving", "saved", "error"] as SaveStatusKind[]).includes(entry.kind)).slice(-ACTIVITY_LOG_LIMIT) : [],
+    selectedTreeNodeId: typeof value.selectedTreeNodeId === "string" && treeNodeIds.has(value.selectedTreeNodeId) ? value.selectedTreeNodeId : null,
+    treeModalRect: {
+      x: cleanNumber(Number(value.treeModalRect?.x), 420),
+      y: cleanNumber(Number(value.treeModalRect?.y), 18),
+      width: safePositive(Number(value.treeModalRect?.width), 520),
+      height: safePositive(Number(value.treeModalRect?.height), 520),
+    },
     treeModalMinimized: Boolean(value.treeModalMinimized),
-    playbackModalPosition: value.playbackModalPosition ?? { x: 28, y: 84 },
+    playbackModalPosition: {
+      x: cleanNumber(Number(value.playbackModalPosition?.x), 28),
+      y: cleanNumber(Number(value.playbackModalPosition?.y), 84),
+    },
     versionHistory: Array.isArray(value.versionHistory) ? value.versionHistory.map((snapshot) => ({
       ...snapshot,
-      treeNodes: Array.isArray(snapshot.treeNodes) ? snapshot.treeNodes : [],
+      treeNodes: normalizeTreeNodes(snapshot.treeNodes),
       pathDataByName: Object.fromEntries(Object.entries(snapshot.pathDataByName ?? {}).map(([name, path]) => [name, normalizePath(path)])),
       activePathNodeId: snapshot.activePathNodeId ?? null,
       obstacles: Array.isArray(snapshot.obstacles) ? snapshot.obstacles.map((obstacle, index) => normalizeObstacle(obstacle, index, normalizedSettings)) : [],
@@ -2186,16 +2433,19 @@ function useElementSize<T extends HTMLElement>(observeKey: unknown = true): [Ref
         animationFrame = globalThis.requestAnimationFrame(attach);
         return;
       }
+      const measure = (): void => {
+        const width = element.clientWidth;
+        const height = element.clientHeight;
+        setSize((current) => current.width === width && current.height === height ? current : { width, height });
+      };
       update = () => {
         if (resizeFrame !== null) return;
         resizeFrame = globalThis.requestAnimationFrame(() => {
           resizeFrame = null;
-          const width = element.clientWidth;
-          const height = element.clientHeight;
-          setSize((current) => current.width === width && current.height === height ? current : { width, height });
+          measure();
         });
       };
-      update();
+      measure();
       if (globalThis.ResizeObserver) {
         observer = new ResizeObserver(update);
         observer.observe(element);
@@ -2223,6 +2473,675 @@ function LayoutGlyph({ mode }: { mode: LayoutMode }): ReactElement {
       <i />
     </span>
   );
+}
+
+interface LiveConnectionActionsProps {
+  selectedRoutineCode: string | null;
+  className: string;
+  onError: (message: string) => void;
+  onPublished: (routineCode: string) => void;
+}
+
+function LiveStatusText(): ReactElement {
+  const { connected, serverConnected } = useLiveTelemetry();
+  return <>{connected ? "Driver Station attached" : serverConnected ? "NT4 connected · Driver Station detached" : "NT4 disconnected"}</>;
+}
+
+function TelemetrySettingsBridge({ settings }: { settings: Settings }): null {
+  const { configure } = useLiveTelemetry();
+
+  useEffect(() => {
+    configure({
+      transport: settings.telemetryTransport,
+      driverStationTopic: settings.driverStationTopic,
+      odometryTopic: settings.odometryTopic,
+      measuredChassisSpeedsTopic: settings.measuredChassisSpeedsTopic,
+      setpointChassisSpeedsTopic: settings.setpointChassisSpeedsTopic,
+    });
+  }, [
+    configure,
+    settings.driverStationTopic,
+    settings.measuredChassisSpeedsTopic,
+    settings.odometryTopic,
+    settings.setpointChassisSpeedsTopic,
+    settings.telemetryTransport,
+  ]);
+
+  return null;
+}
+
+function LiveConnectionActions({
+  selectedRoutineCode,
+  className,
+  onError,
+  onPublished,
+}: LiveConnectionActionsProps): ReactElement {
+  const { connected, publishRoutine } = useLiveTelemetry();
+
+  const publish = async (): Promise<void> => {
+    if (!selectedRoutineCode) {
+      onError("Select a routine in the path tree before publishing.");
+      return;
+    }
+    try {
+      await publishRoutine(selectedRoutineCode);
+      onPublished(selectedRoutineCode);
+    } catch (error) {
+      console.error(error);
+      onError("Could not publish the selected routine over NetworkTables.");
+    }
+  };
+
+  return (
+    <div className={className}>
+      <span className={`connection-pill ${connected ? "connected" : "disconnected"}`}>
+        {connected ? "connected" : "offline"}
+      </span>
+      <button
+        className="publish-routine-button"
+        type="button"
+        disabled={!selectedRoutineCode}
+        title={selectedRoutineCode
+          ? `Publish ${selectedRoutineCode} to /Voyager/SelectedAuto`
+          : "Select a routine in the path tree first"}
+        onClick={() => void publish()}
+      >
+        Publish routine
+      </button>
+    </div>
+  );
+}
+
+interface LiveRobotOverlayProps {
+  settings: Settings;
+  fieldSize: FieldSize;
+}
+
+interface ChassisSpeedVectorGeometry {
+  translationPath: string | null;
+  rotationPath: string | null;
+}
+
+function chassisSpeedVectorGeometry(
+  settings: Settings,
+  fieldSize: FieldSize,
+  pose: { x: number; y: number; rotation: number },
+  speeds: ChassisSpeeds | null,
+  ringIndex: number,
+): ChassisSpeedVectorGeometry {
+  if (!speeds || fieldSize.width <= 0 || fieldSize.height <= 0) {
+    return { translationPath: null, rotationPath: null };
+  }
+
+  const anchor = pointToPixels(settings, fieldSize, pose);
+  const pixelsPerMeter = Math.max(0, Math.min(
+    fieldSize.width / safePositive(settings.fieldLengthMeters, DEFAULT_SETTINGS.fieldLengthMeters),
+    fieldSize.height / safePositive(settings.fieldWidthMeters, DEFAULT_SETTINGS.fieldWidthMeters),
+  ));
+  const robotRadius = Math.max(settings.robotLengthMeters, settings.robotWidthMeters) * pixelsPerMeter * 0.52;
+  const linearSpeed = Math.hypot(speeds.vx, speeds.vy);
+  const velocityAngle = pose.rotation + Math.atan2(speeds.vy, speeds.vx);
+  const screenVelocityAngle = -velocityAngle;
+  const maximumArrowLength = Math.max(24, Math.min(fieldSize.width, fieldSize.height) * 0.24);
+  const arrowLength = clamp(12 + linearSpeed * pixelsPerMeter * 0.5, 12, maximumArrowLength);
+  const arrowStartDistance = robotRadius + 7 + ringIndex * 3;
+  const translationPath = linearSpeed > 0.01
+    ? `M ${anchor.x + Math.cos(screenVelocityAngle) * arrowStartDistance} ${anchor.y + Math.sin(screenVelocityAngle) * arrowStartDistance} L ${anchor.x + Math.cos(screenVelocityAngle) * (arrowStartDistance + arrowLength)} ${anchor.y + Math.sin(screenVelocityAngle) * (arrowStartDistance + arrowLength)}`
+    : null;
+
+  const angularSpeed = Math.abs(speeds.omega);
+  if (angularSpeed <= 0.01) return { translationPath, rotationPath: null };
+  const radius = robotRadius + 20 + ringIndex * 14;
+  const arcSpan = clamp((angularSpeed / 6) * Math.PI * 1.5, Math.PI / 8, Math.PI * 1.5);
+  const screenHeading = -pose.rotation;
+  const startAngle = screenHeading - Math.PI / 2;
+  const arcDirection = speeds.omega >= 0 ? -1 : 1;
+  const endAngle = startAngle + arcDirection * arcSpan;
+  const start = {
+    x: anchor.x + Math.cos(startAngle) * radius,
+    y: anchor.y + Math.sin(startAngle) * radius,
+  };
+  const end = {
+    x: anchor.x + Math.cos(endAngle) * radius,
+    y: anchor.y + Math.sin(endAngle) * radius,
+  };
+  const rotationPath = `M ${start.x} ${start.y} A ${radius} ${radius} 0 ${arcSpan > Math.PI ? 1 : 0} ${arcDirection > 0 ? 1 : 0} ${end.x} ${end.y}`;
+  return { translationPath, rotationPath };
+}
+
+function LiveRobotOverlay({ settings, fieldSize }: LiveRobotOverlayProps): ReactElement {
+  const { anomaly, connected, measuredSpeeds, pose, setpointSpeeds, trail, velocity } = useLiveTelemetry();
+  const headingDegrees = normalizeCompassDegrees((pose.rotation * 180) / Math.PI);
+  const trailPaths = useMemo(() => trail.slice(1).reduce((paths, point, index) => {
+    const start = pointToPixels(settings, fieldSize, trail[index]);
+    const end = pointToPixels(settings, fieldSize, point);
+    const segment = `M ${start.x} ${start.y} L ${end.x} ${end.y} `;
+    if (point.anomaly) paths.anomaly += segment;
+    else paths.normal += segment;
+    return paths;
+  }, { normal: "", anomaly: "" }), [fieldSize, settings, trail]);
+  const measuredVector = useMemo(
+    () => chassisSpeedVectorGeometry(settings, fieldSize, pose, measuredSpeeds, 0),
+    [fieldSize, measuredSpeeds, pose, settings],
+  );
+  const setpointVector = useMemo(
+    () => chassisSpeedVectorGeometry(settings, fieldSize, pose, setpointSpeeds, 1),
+    [fieldSize, pose, setpointSpeeds, settings],
+  );
+  const hasSpeedVector = measuredVector.translationPath || measuredVector.rotationPath
+    || setpointVector.translationPath || setpointVector.rotationPath;
+
+  return (
+    <>
+      {trail.length > 1 ? (
+        <svg className="field-svg live-trail-svg" viewBox={`0 0 ${Math.max(1, fieldSize.width)} ${Math.max(1, fieldSize.height)}`} aria-hidden="true">
+          {trailPaths.normal ? <path className="live-pose-trail" d={trailPaths.normal} /> : null}
+          {trailPaths.anomaly ? <path className="live-pose-trail is-anomaly" d={trailPaths.anomaly} /> : null}
+        </svg>
+      ) : null}
+      {hasSpeedVector ? (
+        <svg className="field-svg chassis-speed-overlay" viewBox={`0 0 ${Math.max(1, fieldSize.width)} ${Math.max(1, fieldSize.height)}`} aria-hidden="true">
+          <defs>
+            <marker id="measured-speed-arrow" markerWidth="5" markerHeight="5" refX="4.3" refY="2.5" orient="auto" markerUnits="strokeWidth">
+              <path className="measured-speed-arrowhead" d="M 0 0 L 5 2.5 L 0 5 z" />
+            </marker>
+            <marker id="setpoint-speed-arrow" markerWidth="5" markerHeight="5" refX="4.3" refY="2.5" orient="auto" markerUnits="strokeWidth">
+              <path className="setpoint-speed-arrowhead" d="M 0 0 L 5 2.5 L 0 5 z" />
+            </marker>
+          </defs>
+          <g className="chassis-speed-vector is-measured">
+            {measuredVector.translationPath ? <path className="translation-vector" d={measuredVector.translationPath} markerEnd="url(#measured-speed-arrow)" /> : null}
+            {measuredVector.rotationPath ? <path className="rotation-vector" d={measuredVector.rotationPath} markerEnd="url(#measured-speed-arrow)" /> : null}
+          </g>
+          <g className="chassis-speed-vector is-setpoint">
+            {setpointVector.translationPath ? <path className="translation-vector" d={setpointVector.translationPath} markerEnd="url(#setpoint-speed-arrow)" /> : null}
+            {setpointVector.rotationPath ? <path className="rotation-vector" d={setpointVector.rotationPath} markerEnd="url(#setpoint-speed-arrow)" /> : null}
+          </g>
+        </svg>
+      ) : null}
+      <div
+        className={`robot-marker live-robot-marker ${anomaly.active ? "is-anomaly" : ""}`}
+        style={robotRenderStyle(settings, fieldSize, pose.x, pose.y, headingDegrees)}
+        aria-label={anomaly.active ? "Live robot pose with a possible collision or wheel slip" : connected ? "Connected live robot pose" : "Disconnected robot pose at 0,0"}
+      >
+        <SwerveModules settings={settings} velocity={velocity} headingDegrees={headingDegrees} />
+      </div>
+    </>
+  );
+}
+
+interface TopicTreeNode {
+  name: string;
+  path: string;
+  topic: TelemetryTopicInfo | null;
+  children: Map<string, TopicTreeNode>;
+}
+
+function buildTopicTree(topics: TelemetryTopicInfo[]): TopicTreeNode {
+  const root: TopicTreeNode = { name: "/", path: "/", topic: null, children: new Map() };
+  topics.forEach((topic) => {
+    const segments = topic.name.split("/").filter(Boolean);
+    let current = root;
+    segments.forEach((segment, index) => {
+      const path = `/${segments.slice(0, index + 1).join("/")}`;
+      let child = current.children.get(segment);
+      if (!child) {
+        child = { name: segment, path, topic: null, children: new Map() };
+        current.children.set(segment, child);
+      }
+      if (index === segments.length - 1) child.topic = topic;
+      current = child;
+    });
+  });
+  return root;
+}
+
+interface TopicTreeRowsProps {
+  node: TopicTreeNode;
+  depth: number;
+  expanded: Set<string>;
+  onToggle: (path: string) => void;
+  onSelect: (topic: string) => void;
+}
+
+function TopicTreeRows({ node, depth, expanded, onToggle, onSelect }: TopicTreeRowsProps): ReactElement {
+  const children = [...node.children.values()].sort((left, right) => {
+    if (Boolean(left.children.size) !== Boolean(right.children.size)) return left.children.size ? -1 : 1;
+    return left.name.localeCompare(right.name);
+  });
+  return (
+    <>
+      {children.map((child) => {
+        const hasChildren = child.children.size > 0;
+        const isExpanded = expanded.has(child.path);
+        return (
+          <React.Fragment key={child.path}>
+            <div className="topic-tree-row" style={{ paddingLeft: `${8 + depth * 16}px` }}>
+              {hasChildren ? (
+                <button className="topic-folder-toggle" type="button" aria-expanded={isExpanded} onClick={() => onToggle(child.path)}>
+                  <span aria-hidden="true">{isExpanded ? "▾" : "›"}</span>
+                  <strong>{child.name}</strong>
+                </button>
+              ) : <span className="topic-tree-spacer" />}
+              {child.topic ? (
+                <button className="topic-leaf" type="button" title={child.topic.name} onClick={() => onSelect(child.topic!.name)}>
+                  <span>{hasChildren ? "value" : child.name}</span>
+                  <small>{child.topic.type}</small>
+                </button>
+              ) : null}
+            </div>
+            {hasChildren && isExpanded ? (
+              <TopicTreeRows node={child} depth={depth + 1} expanded={expanded} onToggle={onToggle} onSelect={onSelect} />
+            ) : null}
+          </React.Fragment>
+        );
+      })}
+    </>
+  );
+}
+
+interface TopicPickerProps {
+  label: string;
+  description: string;
+  value: string | null;
+  topics: TelemetryTopicInfo[];
+  optional?: boolean;
+  onChange: (topic: string | null) => void;
+}
+
+function TopicPicker({ label, description, value, topics, optional = false, onChange }: TopicPickerProps): ReactElement {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [draft, setDraft] = useState(value ?? "");
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const tree = useMemo(() => buildTopicTree(topics), [topics]);
+  const searchResults = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return [];
+    return topics.filter((topic) => topic.name.toLowerCase().includes(query)).slice(0, 150);
+  }, [search, topics]);
+
+  useEffect(() => setDraft(value ?? ""), [value]);
+
+  const commitDraft = (): void => {
+    const trimmed = draft.trim();
+    if (trimmed) onChange(trimmed.startsWith("/") ? trimmed : `/${trimmed}`);
+    else if (optional) onChange(null);
+    else setDraft(value ?? "");
+  };
+
+  const select = (topic: string): void => {
+    setDraft(topic);
+    onChange(topic);
+    setOpen(false);
+    setSearch("");
+  };
+
+  const toggle = (path: string): void => {
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+
+  return (
+    <div className="topic-picker">
+      <div className="topic-picker-heading">
+        <div><strong>{label}</strong><small>{description}</small></div>
+        {optional && value ? <button type="button" onClick={() => onChange(null)}>Clear</button> : null}
+      </div>
+      <div className="topic-picker-control">
+        <input
+          value={draft}
+          placeholder={optional ? "Optional — choose a topic" : "Enter a topic path"}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commitDraft}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              commitDraft();
+              event.currentTarget.blur();
+            }
+          }}
+        />
+        <button type="button" aria-expanded={open} onClick={() => setOpen((current) => !current)}>Browse</button>
+      </div>
+      {open ? (
+        <div className="topic-browser">
+          <div className="topic-browser-toolbar">
+            <input autoFocus value={search} placeholder={`Search ${topics.length} announced topics`} onChange={(event) => setSearch(event.target.value)} />
+            <button type="button" onClick={() => setOpen(false)}>Close</button>
+          </div>
+          <div className="topic-browser-list">
+            {search.trim() ? searchResults.map((topic) => (
+              <button key={topic.name} className="topic-search-result" type="button" onClick={() => select(topic.name)}>
+                <span>{topic.name}</span><small>{topic.type}</small>
+              </button>
+            )) : topics.length > 0 ? (
+              <TopicTreeRows node={tree} depth={0} expanded={expanded} onToggle={toggle} onSelect={select} />
+            ) : (
+              <div className="topic-browser-empty">Connect to NT4 to discover topic folders. You can still type a path above.</div>
+            )}
+            {search.trim() && searchResults.length === 0 ? <div className="topic-browser-empty">No matching topics.</div> : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+const StableTopicPicker = React.memo(TopicPicker, (previous, next) => (
+  previous.label === next.label
+  && previous.description === next.description
+  && previous.value === next.value
+  && previous.topics === next.topics
+  && previous.optional === next.optional
+));
+
+interface LiveTelemetryWorkspaceProps {
+  settings: Settings;
+  nt4Address: string;
+  selectedRoutineCode: string | null;
+  updateSettings: (patch: Partial<Settings>) => void;
+  onError: (message: string) => void;
+  onPublished: (routineCode: string) => void;
+}
+
+function LiveTelemetryWorkspace({
+  settings,
+  nt4Address,
+  selectedRoutineCode,
+  updateSettings,
+  onError,
+  onPublished,
+}: LiveTelemetryWorkspaceProps): ReactElement {
+  const [fieldRef, fieldSize] = useElementSize<HTMLDivElement>(true);
+  const telemetry = useLiveTelemetry();
+  const fieldBackgroundStyle = useMemo<CSSProperties>(() => ({
+    aspectRatio: `${settings.fieldLengthMeters} / ${settings.fieldWidthMeters}`,
+    backgroundImage: settings.fieldImageDataUrl ? `url(${settings.fieldImageDataUrl})` : undefined,
+  }), [settings.fieldImageDataUrl, settings.fieldLengthMeters, settings.fieldWidthMeters]);
+  const speedValue = (value: number): string => Number.isFinite(value) ? value.toFixed(2) : "—";
+
+  return (
+    <main className="live-workspace" data-workspace-tab="live">
+      <section className="live-visual-panel">
+        <div className="live-page-header">
+          <div>
+            <span className="eyebrow">Live telemetry</span>
+            <h1>Robot position</h1>
+            <p><LiveStatusText /> · {nt4Address || "no NT4 address"}</p>
+          </div>
+          <LiveConnectionActions
+            className="connection-actions"
+            selectedRoutineCode={selectedRoutineCode}
+            onError={onError}
+            onPublished={onPublished}
+          />
+        </div>
+
+        <div className={`traction-banner ${telemetry.anomaly.active ? "is-anomaly" : ""}`} role="status">
+          <Activity aria-hidden="true" />
+          <div>
+            <strong>{telemetry.anomaly.active ? "Possible collision or wheel slip" : "Traction monitor"}</strong>
+            <span>{settings.measuredChassisSpeedsTopic && settings.setpointChassisSpeedsTopic
+              ? `Linear error ${speedValue(telemetry.anomaly.linearError)} m/s · angular error ${speedValue(telemetry.anomaly.angularError)} rad/s`
+              : "Select measured and setpoint ChassisSpeeds topics to enable detection."}</span>
+          </div>
+        </div>
+
+        <div className="live-field-shell">
+          <div
+            ref={fieldRef}
+            className={`field-surface live-tab-field ${settings.fieldImageDataUrl ? "has-field-image" : ""}`}
+            data-measured={fieldSize.width > 0 && fieldSize.height > 0}
+            style={fieldBackgroundStyle}
+          >
+            {!settings.fieldImageDataUrl ? <div className="field-placeholder">Live field<br />{formatNumber(settings.fieldLengthMeters)} × {formatNumber(settings.fieldWidthMeters)} m</div> : null}
+            <div
+              className="origin-label"
+              style={{
+                left: `${pointToPixels(settings, fieldSize, { x: 0, y: 0 }).x}px`,
+                top: `${pointToPixels(settings, fieldSize, { x: 0, y: 0 }).y}px`,
+              }}
+            >
+              (0,0)
+            </div>
+            <LiveRobotOverlay settings={settings} fieldSize={fieldSize} />
+          </div>
+        </div>
+
+        <div className="speed-readouts" aria-label="ChassisSpeeds legend and values">
+          <article className="speed-readout is-measured">
+            <span><i aria-hidden="true" />Measured</span>
+            <strong>{telemetry.measuredSpeeds ? `${speedValue(Math.hypot(telemetry.measuredSpeeds.vx, telemetry.measuredSpeeds.vy))} m/s` : "Not selected"}</strong>
+            <small>{telemetry.measuredSpeeds ? `vx ${speedValue(telemetry.measuredSpeeds.vx)} m/s · vy ${speedValue(telemetry.measuredSpeeds.vy)} m/s · ω ${speedValue(telemetry.measuredSpeeds.omega)} rad/s` : "Optional ChassisSpeeds input"}</small>
+          </article>
+          <article className="speed-readout is-setpoint">
+            <span><i aria-hidden="true" />Setpoint</span>
+            <strong>{telemetry.setpointSpeeds ? `${speedValue(Math.hypot(telemetry.setpointSpeeds.vx, telemetry.setpointSpeeds.vy))} m/s` : "Not selected"}</strong>
+            <small>{telemetry.setpointSpeeds ? `vx ${speedValue(telemetry.setpointSpeeds.vx)} m/s · vy ${speedValue(telemetry.setpointSpeeds.vy)} m/s · ω ${speedValue(telemetry.setpointSpeeds.omega)} rad/s` : "Optional ChassisSpeeds input"}</small>
+          </article>
+        </div>
+      </section>
+
+      <aside className="telemetry-config-panel">
+        <section className="telemetry-config-card transport-card">
+          <div className="config-section-heading">
+            <div><span className="eyebrow">Connection</span><h2>NT4 client</h2></div>
+            <span className={`connection-dot ${telemetry.serverConnected ? "connected" : ""}`} title={telemetry.serverConnected ? "NT4 connected" : "NT4 disconnected"} />
+          </div>
+          <div className="transport-switch" role="group" aria-label="NetworkTables client library">
+            <button type="button" className={settings.telemetryTransport === "direct" ? "is-active" : ""} onClick={() => updateSettings({ telemetryTransport: "direct" })}>
+              Direct client
+            </button>
+            <button type="button" className={settings.telemetryTransport === "frc-web-components" ? "is-active" : ""} onClick={() => updateSettings({ telemetryTransport: "frc-web-components" })}>
+              FRC Web Components
+            </button>
+          </div>
+          <p>{settings.telemetryTransport === "direct"
+            ? "Lean startup client with low-rate topic discovery."
+            : "Compatibility client using FRC Web Components’ NT4 implementation."}</p>
+          {telemetry.transportError ? <div className="transport-error">{telemetry.transportError}</div> : null}
+          <div className="topic-count"><strong>{telemetry.topics.length}</strong><span>announced topics discovered</span></div>
+        </section>
+
+        <section className="telemetry-config-card topic-config-card">
+          <div className="config-section-heading"><div><span className="eyebrow">Sources</span><h2>Robot topics</h2></div></div>
+          <StableTopicPicker
+            label="Driver Station attached"
+            description="Boolean controlling the connected state"
+            value={settings.driverStationTopic}
+            topics={telemetry.topics}
+            onChange={(topic) => topic && updateSettings({ driverStationTopic: topic })}
+          />
+          <StableTopicPicker
+            label="Odometry / Robot"
+            description="Pose2d struct, array, or JSON value"
+            value={settings.odometryTopic}
+            topics={telemetry.topics}
+            onChange={(topic) => topic && updateSettings({ odometryTopic: topic })}
+          />
+          <StableTopicPicker
+            label="Measured swerve ChassisSpeeds"
+            description="Optional actual vx, vy, and omega"
+            value={settings.measuredChassisSpeedsTopic}
+            topics={telemetry.topics}
+            optional
+            onChange={(topic) => updateSettings({ measuredChassisSpeedsTopic: topic })}
+          />
+          <StableTopicPicker
+            label="Setpoint swerve ChassisSpeeds"
+            description="Optional commanded vx, vy, and omega"
+            value={settings.setpointChassisSpeedsTopic}
+            topics={telemetry.topics}
+            optional
+            onChange={(topic) => updateSettings({ setpointChassisSpeedsTopic: topic })}
+          />
+        </section>
+      </aside>
+    </main>
+  );
+}
+
+interface CropBounds {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+interface FieldImageCropDialogProps {
+  source: string | null;
+  fieldAspectRatio: number;
+  onCancel: () => void;
+  onApply: (croppedDataUrl: string) => void;
+}
+
+function FieldImageCropDialog({ source, fieldAspectRatio, onCancel, onApply }: FieldImageCropDialogProps): ReactElement {
+  const imageRef = useRef<HTMLImageElement>(null);
+  const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
+  const [bounds, setBounds] = useState<CropBounds>({ left: 0, right: 100, top: 0, bottom: 100 });
+
+  const fitFieldRatio = useCallback((width: number, height: number): void => {
+    if (width <= 0 || height <= 0 || !Number.isFinite(fieldAspectRatio) || fieldAspectRatio <= 0) return;
+    const imageAspect = width / height;
+    if (imageAspect > fieldAspectRatio) {
+      const cropWidth = (fieldAspectRatio / imageAspect) * 100;
+      const inset = (100 - cropWidth) / 2;
+      setBounds({ left: inset, right: 100 - inset, top: 0, bottom: 100 });
+    } else {
+      const cropHeight = (imageAspect / fieldAspectRatio) * 100;
+      const inset = (100 - cropHeight) / 2;
+      setBounds({ left: 0, right: 100, top: inset, bottom: 100 - inset });
+    }
+  }, [fieldAspectRatio]);
+
+  const applyCrop = (): void => {
+    const image = imageRef.current;
+    if (!image || image.naturalWidth <= 0 || image.naturalHeight <= 0) return;
+    const sourceX = Math.round((bounds.left / 100) * image.naturalWidth);
+    const sourceY = Math.round((bounds.top / 100) * image.naturalHeight);
+    const sourceWidth = Math.max(1, Math.round(((bounds.right - bounds.left) / 100) * image.naturalWidth));
+    const sourceHeight = Math.max(1, Math.round(((bounds.bottom - bounds.top) / 100) * image.naturalHeight));
+    const scale = Math.min(1, 3200 / Math.max(sourceWidth, sourceHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+    canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
+    onApply(canvas.toDataURL("image/webp", 0.92));
+  };
+
+  const setEdge = (edge: keyof CropBounds, rawValue: number): void => {
+    setBounds((current) => {
+      const value = clamp(rawValue, 0, 100);
+      if (edge === "left") return { ...current, left: Math.min(value, current.right - 2) };
+      if (edge === "right") return { ...current, right: Math.max(value, current.left + 2) };
+      if (edge === "top") return { ...current, top: Math.min(value, current.bottom - 2) };
+      return { ...current, bottom: Math.max(value, current.top + 2) };
+    });
+  };
+
+  return (
+    <Dialog open={Boolean(source)} onOpenChange={(open) => { if (!open) onCancel(); }}>
+      <DialogContent className="field-crop-dialog">
+        <DialogHeader className="field-crop-header">
+          <div className="preferences-title-icon" aria-hidden="true"><Crop /></div>
+          <div>
+            <DialogTitle>Crop field image</DialogTitle>
+            <DialogDescription>Trim scoreboards, borders, and whitespace so only the playable field remains.</DialogDescription>
+          </div>
+        </DialogHeader>
+        {source ? (
+          <div className="field-crop-body">
+            <div className="crop-preview-stage">
+              <img
+                ref={imageRef}
+                src={source}
+                alt="Uploaded field before cropping"
+                onLoad={(event) => {
+                  const size = { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight };
+                  setImageSize(size);
+                  fitFieldRatio(size.width, size.height);
+                }}
+              />
+              <div
+                className="crop-selection"
+                style={{
+                  left: `${bounds.left}%`,
+                  top: `${bounds.top}%`,
+                  width: `${bounds.right - bounds.left}%`,
+                  height: `${bounds.bottom - bounds.top}%`,
+                }}
+              ><span>Field area</span></div>
+            </div>
+            <div className="crop-controls">
+              {([
+                ["left", "Left edge"],
+                ["right", "Right edge"],
+                ["top", "Top edge"],
+                ["bottom", "Bottom edge"],
+              ] as Array<[keyof CropBounds, string]>).map(([edge, label]) => (
+                <label key={edge}>
+                  <span>{label}<output>{Math.round(bounds[edge])}%</output></span>
+                  <input type="range" min="0" max="100" step="0.1" value={bounds[edge]} onChange={(event) => setEdge(edge, Number(event.target.value))} />
+                </label>
+              ))}
+            </div>
+            <div className="crop-summary">
+              <span>Source {imageSize.width || "—"} × {imageSize.height || "—"} px</span>
+              <span>Field ratio {formatNumber(fieldAspectRatio, 3)}:1</span>
+            </div>
+            <div className="crop-actions">
+              <button type="button" onClick={() => setBounds({ left: 0, right: 100, top: 0, bottom: 100 })}>Use full image</button>
+              <button type="button" onClick={() => fitFieldRatio(imageSize.width, imageSize.height)}>Fit field ratio</button>
+              <span />
+              <button type="button" onClick={onCancel}>Cancel</button>
+              <button className="is-primary" type="button" onClick={applyCrop}>Apply crop</button>
+            </div>
+          </div>
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+interface AutoPublishOnConnectProps {
+  enabled: boolean;
+  hydrated: boolean;
+  selectedRoutineCode: string | null;
+  onError: (message: string) => void;
+  onPublished: (routineCode: string) => void;
+}
+
+function AutoPublishOnConnect({
+  enabled,
+  hydrated,
+  selectedRoutineCode,
+  onError,
+  onPublished,
+}: AutoPublishOnConnectProps): null {
+  const { connected, publishRoutine } = useLiveTelemetry();
+  const wasConnectedRef = useRef(false);
+
+  useEffect(() => {
+    const justConnected = connected && !wasConnectedRef.current;
+    wasConnectedRef.current = connected;
+    if (!justConnected || !enabled || !hydrated || !selectedRoutineCode) return;
+    void publishRoutine(selectedRoutineCode)
+      .then(() => onPublished(selectedRoutineCode))
+      .catch((error) => {
+        console.error(error);
+        onError("Robot connected, but Voyager could not publish the selected routine.");
+      });
+  }, [connected, enabled, hydrated, onError, onPublished, publishRoutine, selectedRoutineCode]);
+
+  return null;
 }
 
 const EDITOR_HISTORY_LIMIT = 100;
@@ -2267,9 +3186,9 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const appRef = useRef<HTMLDivElement>(null);
   const workspaceRef = useRef<HTMLElement>(null);
   const leftPanelRef = useRef<HTMLDivElement>(null);
-  const [fieldOneRef, fieldOneSize] = useElementSize<HTMLDivElement>();
-  const [fieldTwoRef, fieldTwoSize] = useElementSize<HTMLDivElement>();
-  const [treeViewportRef, treeViewportSize] = useElementSize<HTMLDivElement>();
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>("auto");
+  const [fieldOneRef, fieldOneSize] = useElementSize<HTMLDivElement>(activeWorkspaceTab === "auto");
+  const [treeViewportRef, treeViewportSize] = useElementSize<HTMLDivElement>(activeWorkspaceTab === "auto");
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [treeNodes, setTreeNodes] = useState<PathTreeNode[]>([]);
   const [pathDataByName, setPathDataByName] = useState<Record<string, SharedPathData>>({});
@@ -2282,6 +3201,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [treeAddMenuOpen, setTreeAddMenuOpen] = useState(false);
   const [moreToolsOpen, setMoreToolsOpen] = useState(false);
+  const [appMenuOpen, setAppMenuOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [pendingConnection, setPendingConnection] = useState<PendingTreeConnection | null>(null);
   const [modal, setModal] = useState<ElementModalState>(null);
@@ -2306,18 +3226,18 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const [treeModalRect, setTreeModalRect] = useState<TreeModalRect>({ x: 420, y: 18, width: 520, height: 520 });
   const [treeModalMinimized, setTreeModalMinimized] = useState(false);
   const [selectedTreeNodeId, setSelectedTreeNodeId] = useState<string | null>(null);
-  const [liveVelocity, setLiveVelocity] = useState<RobotVelocity>({ vx: 0, vy: 0, omega: 0 });
-  const [livePoseTrail, setLivePoseTrail] = useState<Pose2d[]>([]);
   const [renamingNodeId, setRenamingNodeId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [activeRotationHandleId, setActiveRotationHandleId] = useState<string | null>(null);
   const [nt4AddressDraft, setNt4AddressDraft] = useState(nt4Address);
+  const [fieldCropSource, setFieldCropSource] = useState<string | null>(null);
   const persistTimerRef = useRef<number | null>(null);
   const autoSaveTimerRef = useRef<number | null>(null);
   const metadataAutoSaveTimerRef = useRef<number | null>(null);
   const historyCommitTimerRef = useRef<number | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const elementModalRef = useRef<HTMLDivElement>(null);
+  const settingsModalRef = useRef<HTMLDivElement>(null);
   const playbackModalRef = useRef<HTMLDivElement>(null);
   const playbackRobotRef = useRef<HTMLDivElement>(null);
   const playbackTimelineRef = useRef<HTMLInputElement>(null);
@@ -2334,16 +3254,8 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const playbackTimeRef = useRef(0);
   const treeClipboardRef = useRef<TreeClipboardSnapshot | null>(null);
   const clipboardPasteCountRef = useRef(0);
-  const previousLivePoseRef = useRef<{ pose: Pose2d; timestamp: number } | null>(null);
-  const wasRobotConnectedRef = useRef(false);
   const draggingModalRef = useRef<{ offsetX: number; offsetY: number } | null>(null);
   const dragOperationRef = useRef<(() => void) | null>(null);
-  const [connected] = useEntry<boolean>("/AdvantageKit/DriverStation/DSAttached", false);
-  const [poseStruct] = useEntry<Uint8Array>(
-    "/AdvantageKit/RealOutputs/Odometry/Robot",
-    new Uint8Array([...new Array(24).fill(0)]),
-  );
-  const [, setSelectedAutoEntry] = useEntry<string>("/Voyager/SelectedAuto", "");
 
   versionHistoryRef.current = versionHistory;
 
@@ -2354,12 +3266,71 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       ...status,
       id: createId("activity"),
       timestamp: Date.now(),
-    }]);
+    }].slice(-ACTIVITY_LOG_LIMIT));
   }, []);
 
   useEffect(() => {
     setNt4AddressDraft(nt4Address);
   }, [nt4Address]);
+
+  useEffect(() => {
+    if (activeWorkspaceTab !== "live") return;
+    dragOperationRef.current?.();
+    dragOperationRef.current = null;
+    setPlaybackPlaying(false);
+    setPlaybackOpen(false);
+    setModal(null);
+    setContextMenu(null);
+    setTreeAddMenuOpen(false);
+    setMoreToolsOpen(false);
+    setPathPlannerActive(false);
+    setPathPlannerPoints([]);
+    setPathPlannerStartWaypointId(null);
+    setActiveRotationHandleId(null);
+  }, [activeWorkspaceTab]);
+
+  useEffect(() => {
+    if (!settingsOpen || fieldCropSource) return;
+    const focusFrame = window.requestAnimationFrame(() => settingsModalRef.current?.focus());
+    const onKeyDown = (event: KeyboardEvent): void => {
+      const modalElement = settingsModalRef.current;
+      if (!modalElement) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setSettingsOpen(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(modalElement.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+      )).filter((element) => element.offsetParent !== null);
+      if (focusable.length === 0) {
+        event.preventDefault();
+        modalElement.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable.at(-1)!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [fieldCropSource, settingsOpen]);
+
+  useEffect(() => {
+    if (!modal) return;
+    const focusFrame = window.requestAnimationFrame(() => elementModalRef.current?.focus());
+    return () => window.cancelAnimationFrame(focusFrame);
+  }, [modal]);
 
   const activePathNode = useMemo<PathTreePathNode | null>(() => {
     if (!activePathNodeId) return null;
@@ -2423,7 +3394,6 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       pose.angle,
     );
   }, [activePathData, fieldOneSize, playbackPlan, settings]);
-  const livePose: Pose2d = connected ? parsePose2d(poseStruct) : { x: 0, y: 0, rotation: 0 };
   const pxPerMeter = fieldOneSize.width > 0 ? fieldOneSize.width / settings.fieldLengthMeters : 0;
   const selectedRoutineCode = useMemo(() => selectedRoutineCodeFromNodes(treeNodes), [treeNodes]);
   const selectedRoutineWaypointPreviews = useMemo(() => {
@@ -2554,39 +3524,6 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       playbackAnimationFrameRef.current = null;
     };
   }, [applyPlaybackVisualTime, playbackOpen, playbackPlan.totalDuration, playbackPlaying]);
-
-  useEffect(() => {
-    if (!connected || !Number.isFinite(livePose.x) || !Number.isFinite(livePose.y) || !Number.isFinite(livePose.rotation)) {
-      previousLivePoseRef.current = null;
-      setLiveVelocity({ vx: 0, vy: 0, omega: 0 });
-      return;
-    }
-
-    const timestamp = performance.now();
-    const previous = previousLivePoseRef.current;
-    if (previous) {
-      const elapsed = (timestamp - previous.timestamp) / 1000;
-      if (elapsed >= 0.005 && elapsed <= 1) {
-        setLiveVelocity({
-          vx: (livePose.x - previous.pose.x) / elapsed,
-          vy: (livePose.y - previous.pose.y) / elapsed,
-          omega: (shortestAngleDelta(
-            (previous.pose.rotation * 180) / Math.PI,
-            (livePose.rotation * 180) / Math.PI,
-          ) * Math.PI) / 180 / elapsed,
-        });
-      }
-    }
-    previousLivePoseRef.current = { pose: livePose, timestamp };
-    setLivePoseTrail((trail) => {
-      const last = trail.at(-1);
-      if (last && distanceBetween(last, livePose) < 0.01 && Math.abs(shortestAngleDelta(
-        (last.rotation * 180) / Math.PI,
-        (livePose.rotation * 180) / Math.PI,
-      )) < 0.5) return trail;
-      return [...trail, livePose];
-    });
-  }, [connected, livePose.rotation, livePose.x, livePose.y]);
 
   useLayoutEffect(() => {
     if (!contextMenu) return;
@@ -2764,7 +3701,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
           setPan(stored.pan);
           setVersionHistory(stored.versionHistory ?? []);
           setObstacles(stored.obstacles ?? []);
-          setActivityLog(stored.activityLog ?? []);
+          setActivityLog((stored.activityLog ?? []).slice(-ACTIVITY_LOG_LIMIT));
           setSelectedTreeNodeId(stored.selectedTreeNodeId ?? null);
           if (stored.treeModalRect) setTreeModalRect(stored.treeModalRect);
           setTreeModalMinimized(Boolean(stored.treeModalMinimized));
@@ -2807,11 +3744,11 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
         console.error(error);
         setSaveStatus({ kind: "error", message: "Could not save local IndexedDB state." });
       });
-    }, 250);
+    }, LOCAL_PERSIST_DELAY_MS);
   }, [activePathNodeId, activityLog, hydrated, knownPathFileNames, obstacles, pan, pathDataByName, playbackModalPosition, selectedTreeNodeId, settings, treeModalMinimized, treeModalRect, treeNodes, versionHistory]);
 
   const updateSettings = useCallback((patch: Partial<Settings>): void => {
-    setSettings((previous) => ({ ...previous, ...patch }));
+    setSettings((previous) => stabilizeSettings({ ...previous, ...patch }));
   }, []);
 
   const recordVersionSnapshot = useCallback((source: VersionHistorySnapshot["source"], state?: EditorSnapshot): VersionHistorySnapshot[] => {
@@ -2853,6 +3790,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const closeMenus = useCallback((): void => {
     setTreeAddMenuOpen(false);
     setMoreToolsOpen(false);
+    setAppMenuOpen(false);
     setContextMenu(null);
   }, []);
 
@@ -3035,6 +3973,10 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       setError("Name cannot be empty.");
       return;
     }
+    if (nextName.length > 120) {
+      setError("Names must be 120 characters or fewer.");
+      return;
+    }
 
     const target = treeNodes.find((node) => node.id === renamingNodeId);
     if (!target) {
@@ -3045,6 +3987,17 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
 
     if (target.kind === "path") {
       const oldName = target.name;
+      const nextFileName = sanitizeFileName(nextName).toLocaleLowerCase();
+      const conflictingPath = treeNodes.find((node) => (
+        node.kind === "path"
+        && node.id !== target.id
+        && node.name !== nextName
+        && sanitizeFileName(node.name).toLocaleLowerCase() === nextFileName
+      ));
+      if (conflictingPath) {
+        setError(`Another path already uses the file name ${sanitizeFileName(nextName)}.json.`);
+        return;
+      }
       const pathNodeCountWithOldName = treeNodes.filter((node) => node.kind === "path" && node.name === oldName).length;
       if (oldName !== nextName) {
         setKnownPathFileNames((current) => current.includes(oldName) ? current : [...current, oldName]);
@@ -3433,21 +4386,49 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     };
   }, []);
 
+  const modalPositionFromElement = useCallback((element: HTMLElement): PixelPoint => {
+    const appRect = appRef.current?.getBoundingClientRect();
+    const elementRect = element.getBoundingClientRect();
+    if (!appRect) return { x: 80, y: 80 };
+    return {
+      x: clamp(elementRect.right - appRect.left + 12, 8, Math.max(8, appRect.width - 260)),
+      y: clamp(elementRect.top - appRect.top + 12, 48, Math.max(48, appRect.height - 260)),
+    };
+  }, []);
+
   const beginWaypointDrag = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>, waypoint: Waypoint): void => {
       if (fieldOneSize.width <= 0 || fieldOneSize.height <= 0) return;
-      const fieldRect = fieldOneRef.current?.getBoundingClientRect();
-      if (!fieldRect) return;
+      const fieldElement = fieldOneRef.current;
+      if (!fieldElement) return;
+      const waypointIndex = activePathData.waypoints.findIndex((candidate) => candidate.id === waypoint.id);
+      const previousLine = waypointIndex > 0
+        ? fieldElement.querySelector<SVGLineElement>(`[data-path-segment-index="${waypointIndex - 1}"]`)
+        : null;
+      const nextLine = waypointIndex >= 0
+        ? fieldElement.querySelector<SVGLineElement>(`[data-path-segment-index="${waypointIndex}"]`)
+        : null;
+      const markerElement = event.currentTarget;
       const startMouse = { x: event.clientX, y: event.clientY };
       const startPoint = pointToPixels(settings, fieldOneSize, waypoint);
+      let nextPoint = { x: waypoint.x, y: waypoint.y };
       let moved = false;
+
+      const renderPoint = (point: MeterPoint): void => {
+        const pixel = pointToPixels(settings, fieldOneSize, point);
+        applyRobotRenderStyle(markerElement, robotRenderStyle(settings, fieldOneSize, point.x, point.y, waypoint.angle));
+        previousLine?.setAttribute("x2", String(pixel.x));
+        previousLine?.setAttribute("y2", String(pixel.y));
+        nextLine?.setAttribute("x1", String(pixel.x));
+        nextLine?.setAttribute("y1", String(pixel.y));
+      };
 
       const pointerFrame = createPointerFrameScheduler((clientX, clientY) => {
         const dx = clientX - startMouse.x;
         const dy = clientY - startMouse.y;
         if (Math.abs(dx) > 2 || Math.abs(dy) > 2) moved = true;
-        const nextPoint = clampMeterPoint(settings, pixelsToPoint(settings, fieldOneSize, { x: startPoint.x + dx, y: startPoint.y + dy }));
-        updateWaypoint(waypoint.id, nextPoint);
+        nextPoint = clampMeterPoint(settings, pixelsToPoint(settings, fieldOneSize, { x: startPoint.x + dx, y: startPoint.y + dy }));
+        renderPoint(nextPoint);
       });
       const onPointerMove = (moveEvent: PointerEvent): void => pointerFrame.schedule(moveEvent.clientX, moveEvent.clientY);
 
@@ -3456,7 +4437,9 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
         window.removeEventListener("pointermove", onPointerMove);
         window.removeEventListener("pointerup", onPointerUp);
         dragOperationRef.current = null;
-        if (!moved) {
+        if (moved) {
+          updateWaypoint(waypoint.id, nextPoint);
+        } else {
           const appRect = appRef.current?.getBoundingClientRect();
           setModal({
             kind: "waypoint",
@@ -3471,11 +4454,12 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       window.addEventListener("pointerup", onPointerUp);
       dragOperationRef.current = () => {
         pointerFrame.cancel();
+        renderPoint(waypoint);
         window.removeEventListener("pointermove", onPointerMove);
         window.removeEventListener("pointerup", onPointerUp);
       };
     },
-    [fieldOneRef, fieldOneSize, settings, updateWaypoint],
+    [activePathData.waypoints, fieldOneRef, fieldOneSize, settings, updateWaypoint],
   );
 
   const beginWaypointRotate = useCallback(
@@ -3484,6 +4468,8 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       if (fieldOneSize.width <= 0 || fieldOneSize.height <= 0) return;
       const fieldRect = fieldOneRef.current?.getBoundingClientRect();
       if (!fieldRect) return;
+      const markerElement = event.currentTarget.closest<HTMLElement>(".robot-marker");
+      let nextAngle = waypoint.angle;
       setActiveRotationHandleId(`waypoint-${waypoint.id}`);
 
       const pointerFrame = createPointerFrameScheduler((clientX, clientY) => {
@@ -3494,12 +4480,14 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
           fieldRect.left + center.x,
           fieldRect.top + center.y,
         );
-        updateWaypoint(waypoint.id, { angle: Number(angle.toFixed(2)) });
+        nextAngle = Number(angle.toFixed(2));
+        if (markerElement) markerElement.style.transform = `rotate(${compassDegreesToCssRotation(nextAngle)}deg)`;
       });
       const onPointerMove = (moveEvent: PointerEvent): void => pointerFrame.schedule(moveEvent.clientX, moveEvent.clientY);
 
       const onPointerUp = (): void => {
         pointerFrame.flush();
+        updateWaypoint(waypoint.id, { angle: nextAngle });
         setActiveRotationHandleId(null);
         window.removeEventListener("pointermove", onPointerMove);
         window.removeEventListener("pointerup", onPointerUp);
@@ -3510,6 +4498,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       window.addEventListener("pointerup", onPointerUp);
       dragOperationRef.current = () => {
         pointerFrame.cancel();
+        if (markerElement) markerElement.style.transform = `rotate(${compassDegreesToCssRotation(waypoint.angle)}deg)`;
         setActiveRotationHandleId(null);
         window.removeEventListener("pointermove", onPointerMove);
         window.removeEventListener("pointerup", onPointerUp);
@@ -3525,6 +4514,8 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       const fieldRect = fieldOneRef.current?.getBoundingClientRect();
       const point = pointAtPathPosition(activePathData.waypoints, target.position);
       if (!fieldRect || !point) return;
+      const markerElement = event.currentTarget.closest<HTMLElement>(".robot-marker");
+      let nextAngle = target.angle;
       setActiveRotationHandleId(`target-${target.id}`);
 
       const pointerFrame = createPointerFrameScheduler((clientX, clientY) => {
@@ -3535,12 +4526,14 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
           fieldRect.left + center.x,
           fieldRect.top + center.y,
         );
-        updateRotationTarget(target.id, { angle: Number(angle.toFixed(2)) });
+        nextAngle = Number(angle.toFixed(2));
+        if (markerElement) markerElement.style.transform = `rotate(${compassDegreesToCssRotation(nextAngle)}deg)`;
       });
       const onPointerMove = (moveEvent: PointerEvent): void => pointerFrame.schedule(moveEvent.clientX, moveEvent.clientY);
 
       const onPointerUp = (): void => {
         pointerFrame.flush();
+        updateRotationTarget(target.id, { angle: nextAngle });
         setActiveRotationHandleId(null);
         window.removeEventListener("pointermove", onPointerMove);
         window.removeEventListener("pointerup", onPointerUp);
@@ -3551,6 +4544,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       window.addEventListener("pointerup", onPointerUp);
       dragOperationRef.current = () => {
         pointerFrame.cancel();
+        if (markerElement) markerElement.style.transform = `rotate(${compassDegreesToCssRotation(target.angle)}deg)`;
         setActiveRotationHandleId(null);
         window.removeEventListener("pointermove", onPointerMove);
         window.removeEventListener("pointerup", onPointerUp);
@@ -3565,13 +4559,26 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       if (fieldOneSize.width <= 0 || fieldOneSize.height <= 0 || activePathData.waypoints.length < 2) return;
       const fieldRect = fieldOneRef.current?.getBoundingClientRect();
       if (!fieldRect) return;
+      const markerElement = event.currentTarget;
+      let nextPosition = 0;
 
       const moveTo = (clientX: number, clientY: number): void => {
         const position = nearestPathPositionFromPixel(settings, fieldOneSize, activePathData.waypoints, {
           x: clientX - fieldRect.left,
           y: clientY - fieldRect.top,
         });
-        updatePosition(Number(position.toFixed(2)));
+        nextPosition = Number(position.toFixed(2));
+        const point = pointAtPathPosition(activePathData.waypoints, nextPosition);
+        if (!point) return;
+        const pixel = pointToPixels(settings, fieldOneSize, point);
+        if (markerElement.classList.contains("robot-marker")) {
+          const style = robotRenderStyle(settings, fieldOneSize, point.x, point.y, 0);
+          markerElement.style.left = String(style.left);
+          markerElement.style.top = String(style.top);
+        } else {
+          markerElement.style.left = `${pixel.x}px`;
+          markerElement.style.top = `${pixel.y}px`;
+        }
       };
 
       moveTo(event.clientX, event.clientY);
@@ -3580,6 +4587,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       const onPointerMove = (moveEvent: PointerEvent): void => pointerFrame.schedule(moveEvent.clientX, moveEvent.clientY);
       const onPointerUp = (): void => {
         pointerFrame.flush();
+        updatePosition(nextPosition);
         window.removeEventListener("pointermove", onPointerMove);
         window.removeEventListener("pointerup", onPointerUp);
         dragOperationRef.current = null;
@@ -4024,10 +5032,11 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     reader.onerror = () => setError("Could not read the selected field image.");
     reader.onload = () => {
       const result = reader.result;
-      if (typeof result === "string") updateSettings({ fieldImageDataUrl: result });
+      if (typeof result === "string") setFieldCropSource(result);
     };
     reader.readAsDataURL(file);
-  }, [setError, updateSettings]);
+    event.currentTarget.value = "";
+  }, [setError]);
 
   const selectRobotCodeProject = useCallback(async (): Promise<void> => {
     if (!window.electronAPI) {
@@ -4115,7 +5124,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       setActivePathNodeId(projectState.activePathNodeId);
       setPan(projectState.pan);
       setObstacles(projectState.obstacles ?? []);
-      setActivityLog(projectState.activityLog ?? []);
+      setActivityLog((projectState.activityLog ?? []).slice(-ACTIVITY_LOG_LIMIT));
       setSelectedTreeNodeId(projectState.selectedTreeNodeId ?? null);
       if (projectState.treeModalRect) setTreeModalRect(projectState.treeModalRect);
       setTreeModalMinimized(Boolean(projectState.treeModalMinimized));
@@ -4137,24 +5146,9 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     await window.electronAPI.deleteTextFile(folder, fileName);
   }, [settings.robotCodeProjectFolder]);
 
-  const publishSelectedRoutine = useCallback((): void => {
-    if (!selectedRoutineCode) {
-      setError("Select a routine in the path tree before publishing.");
-      return;
-    }
-
-    setLivePoseTrail(connected ? [livePose] : []);
-    previousLivePoseRef.current = connected ? { pose: livePose, timestamp: performance.now() } : null;
-    setSelectedAutoEntry(selectedRoutineCode);
-    setSaveStatus({ kind: "saved", message: `Published routine ${selectedRoutineCode} to /Voyager/SelectedAuto.` });
-  }, [connected, livePose.rotation, livePose.x, livePose.y, selectedRoutineCode, setError, setSelectedAutoEntry]);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    const justConnected = connected && !wasRobotConnectedRef.current;
-    wasRobotConnectedRef.current = connected;
-    if (justConnected && settings.autoPublishOnConnect && selectedRoutineCode) publishSelectedRoutine();
-  }, [connected, hydrated, publishSelectedRoutine, selectedRoutineCode, settings.autoPublishOnConnect]);
+  const handleRoutinePublished = useCallback((routineCode: string): void => {
+    setSaveStatus({ kind: "saved", message: `Published routine ${routineCode} to /Voyager/SelectedAuto.` });
+  }, [setSaveStatus]);
 
   const savePathByName = useCallback(async (pathName: string): Promise<void> => {
     const data = pathDataByName[pathName] ?? createEmptyPathData();
@@ -4239,22 +5233,34 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   }, [recordVersionSnapshot, writeProjectMetadata]);
 
   useEffect(() => {
-    if (!hydrated || !settings.autoSave) return;
     if (autoSaveTimerRef.current) window.clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = null;
+    if (!hydrated || !settings.autoSave) return;
     autoSaveTimerRef.current = window.setTimeout(() => {
+      autoSaveTimerRef.current = null;
       if (settings.robotCodeProjectFolder) void saveAll("auto");
       else recordVersionSnapshot("auto");
     }, 900);
+    return () => {
+      if (autoSaveTimerRef.current) window.clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    };
   }, [hydrated, obstacles, pathDataByName, recordVersionSnapshot, saveAll, settings.autoSave, settings.robotCodeProjectFolder, treeNodes]);
 
   useEffect(() => {
-    if (!hydrated || !settings.autoSaveMetadata || settings.autoSave || !settings.robotCodeProjectFolder) return;
     if (metadataAutoSaveTimerRef.current) window.clearTimeout(metadataAutoSaveTimerRef.current);
+    metadataAutoSaveTimerRef.current = null;
+    if (!hydrated || !settings.autoSaveMetadata || settings.autoSave || !settings.robotCodeProjectFolder) return;
     metadataAutoSaveTimerRef.current = window.setTimeout(() => {
+      metadataAutoSaveTimerRef.current = null;
       void writeProjectMetadata().catch((error: unknown) => {
         console.error("Could not automatically save Voyager metadata.", error);
       });
     }, 1_000);
+    return () => {
+      if (metadataAutoSaveTimerRef.current) window.clearTimeout(metadataAutoSaveTimerRef.current);
+      metadataAutoSaveTimerRef.current = null;
+    };
   }, [hydrated, settings.autoSave, settings.autoSaveMetadata, settings.robotCodeProjectFolder, writeProjectMetadata]);
 
   useEffect(() => {
@@ -4520,16 +5526,6 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     backgroundImage: settings.fieldImageDataUrl ? `url(${settings.fieldImageDataUrl})` : undefined,
   }), [settings.fieldImageDataUrl, settings.fieldLengthMeters, settings.fieldWidthMeters]);
 
-  const liveTrailFieldOnePoints = useMemo(() => livePoseTrail.map((pose) => {
-    const point = pointToPixels(settings, fieldOneSize, pose);
-    return `${point.x},${point.y}`;
-  }).join(" "), [fieldOneSize, livePoseTrail, settings]);
-
-  const liveTrailFieldTwoPoints = useMemo(() => livePoseTrail.map((pose) => {
-    const point = pointToPixels(settings, fieldTwoSize, pose);
-    return `${point.x},${point.y}`;
-  }).join(" "), [fieldTwoSize, livePoseTrail, settings]);
-
   const treeEdges = useMemo(() => {
     const byId = new Map(treeNodes.map((node) => [node.id, node]));
     return treeNodes
@@ -4577,6 +5573,21 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
         event.stopPropagation();
         startRename(node);
       }}
+      role={renamingNodeId === node.id ? undefined : "button"}
+      tabIndex={renamingNodeId === node.id ? -1 : 0}
+      aria-label={renamingNodeId === node.id ? undefined : `${node.name}, ${treeKindDescription(node.kind)}`}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (event.key === "F2") {
+          event.preventDefault();
+          startRename(node);
+          return;
+        }
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        setSelectedTreeNodeId(node.id);
+        if (node.kind === "path") activatePathNode(node.id);
+      }}
     >
       {renamingNodeId === node.id ? (
         <input
@@ -4601,7 +5612,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
         </>
       )}
     </div>
-  )), [beginNodeDrag, commitRename, renameDraft, renamingNodeId, selectedTreeNodeId, showNodeMenu, startRename, treeNodes]);
+  )), [activatePathNode, beginNodeDrag, commitRename, renameDraft, renamingNodeId, selectedTreeNodeId, showNodeMenu, startRename, treeNodes]);
 
   const activeWaypointModal = modal?.kind === "waypoint" ? activePathData.waypoints.find((waypoint) => waypoint.id === modal.id) ?? null : null;
   const activeRotationTargetModal = modal?.kind === "rotationTarget" ? activePathData.rotationTargets.find((target) => target.id === modal.id) ?? null : null;
@@ -4618,46 +5629,28 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
 
   return (
     <div ref={appRef} className={`voyager-app layout-${settings.layoutMode} design-${settings.designPreset}`} style={appThemeStyle} onClick={closeMenus}>
+      <TelemetrySettingsBridge settings={settings} />
+      <AutoPublishOnConnect
+        enabled={settings.autoPublishOnConnect}
+        hydrated={hydrated}
+        selectedRoutineCode={selectedRoutineCode}
+        onError={setError}
+        onPublished={handleRoutinePublished}
+      />
       <header className="voyager-nav">
-        <div className="nav-left">
+        <div className="nav-brand">
           <div className="app-icon" aria-hidden="true">V</div>
-          <strong className="app-name">Voyager</strong>
-          <span className="version-chip">{VOYAGER_VERSION}</span>
-          <button className="nav-button" type="button" onClick={(event) => { event.stopPropagation(); setSaveModalOpen(true); }}>
-            Save
-          </button>
-          <button className="nav-button" type="button" onClick={(event) => { event.stopPropagation(); setSettingsOpen(true); }}>
-            Settings
-          </button>
-          <button className="nav-button" type="button" onClick={(event) => { event.stopPropagation(); setVersionHistoryOpen(true); }}>
-            Version History
-          </button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="nav-button obstacle-map-button"
-            onClick={(event) => {
-              event.stopPropagation();
-              setObstaclesOpen(true);
-            }}
-          >
-            <Boxes data-icon="inline-start" />
-            Obstacle Map
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="nav-button preferences-button"
-            onClick={(event) => {
-              event.stopPropagation();
-              setPreferencesOpen(true);
-            }}
-          >
-            <Palette data-icon="inline-start" />
-            Preferences
-          </Button>
-          <div className="layout-switcher" aria-label="Workspace layout" onClick={(event) => event.stopPropagation()}>
-            <span className="layout-switcher-label">Layout</span>
+          <div className="brand-copy">
+            <strong className="app-name">Voyager</strong>
+            <span className="version-chip">{VOYAGER_VERSION}</span>
+          </div>
+        </div>
+        <nav className="workspace-tabs" aria-label="Voyager workspace">
+          <button type="button" className={activeWorkspaceTab === "auto" ? "is-active" : ""} aria-current={activeWorkspaceTab === "auto" ? "page" : undefined} onClick={() => setActiveWorkspaceTab("auto")}>Auto builder</button>
+          <button type="button" className={activeWorkspaceTab === "live" ? "is-active" : ""} aria-current={activeWorkspaceTab === "live" ? "page" : undefined} onClick={() => setActiveWorkspaceTab("live")}>Live robot</button>
+        </nav>
+        <div className="nav-actions">
+          {activeWorkspaceTab === "auto" ? <div className="layout-switcher" aria-label="Workspace layout" onClick={(event) => event.stopPropagation()}>
             {([
               { mode: "default", title: "Fields left, path tree right" },
               { mode: "horizontal", title: "Fields top, path tree bottom" },
@@ -4676,6 +5669,39 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                 <LayoutGlyph mode={mode} />
               </button>
             ))}
+          </div> : null}
+          <button className="nav-save-button" type="button" onClick={(event) => { event.stopPropagation(); setSaveModalOpen(true); }}>
+            <SaveIcon aria-hidden="true" /> Save
+          </button>
+          <div className="app-menu" onClick={(event) => event.stopPropagation()}>
+            <button
+              className={`nav-tools-button ${appMenuOpen ? "is-active" : ""}`}
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={appMenuOpen}
+              onClick={() => setAppMenuOpen((open) => !open)}
+            >
+              <Menu aria-hidden="true" /> Tools
+            </button>
+            {appMenuOpen ? (
+              <div className="dropdown-menu app-menu-panel" role="menu" aria-label="Voyager tools">
+                <button type="button" role="menuitem" onClick={() => { setSettingsOpen(true); setAppMenuOpen(false); }}>
+                  <SettingsIcon aria-hidden="true" /><span><strong>Settings</strong><small>Robot, field, and controls</small></span>
+                </button>
+                <button type="button" role="menuitem" onClick={() => { setObstaclesOpen(true); setAppMenuOpen(false); }}>
+                  <Boxes aria-hidden="true" /><span><strong>Obstacle map</strong><small>Edit field collision zones</small></span>
+                </button>
+                <button type="button" role="menuitem" disabled={!settings.fieldImageDataUrl} onClick={() => { setFieldCropSource(settings.fieldImageDataUrl); setAppMenuOpen(false); }}>
+                  <Crop aria-hidden="true" /><span><strong>Crop field image</strong><small>Trim the current field artwork</small></span>
+                </button>
+                <button type="button" role="menuitem" onClick={() => { setVersionHistoryOpen(true); setAppMenuOpen(false); }}>
+                  <History aria-hidden="true" /><span><strong>Version history</strong><small>Restore saved snapshots</small></span>
+                </button>
+                <button type="button" role="menuitem" onClick={() => { setPreferencesOpen(true); setAppMenuOpen(false); }}>
+                  <Palette aria-hidden="true" /><span><strong>Appearance</strong><small>Theme and workspace design</small></span>
+                </button>
+              </div>
+            ) : null}
           </div>
           <div className={`status-activity ${saveStatus.message ? "has-message" : ""}`} onClick={(event) => event.stopPropagation()}>
             <span className={`save-status save-status-${saveStatus.kind}`} title={saveStatus.message}>{saveStatus.message}</span>
@@ -4692,7 +5718,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
         </div>
       </header>
 
-      <main ref={workspaceRef} className="workspace">
+      {activeWorkspaceTab === "auto" ? <main ref={workspaceRef} className="workspace" data-workspace-tab="auto">
         <section ref={leftPanelRef} className="left-panel">
           <section className="field-card auto-field-card">
             <div className="field-toolbar">
@@ -4701,19 +5727,6 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                 <p>{activePathName ? `Editing ${activePathName}` : "Select a path block to edit"}</p>
               </div>
               <div className="field-actions">
-                {settings.layoutMode === "focus" ? (
-                  <div className="focus-connection-actions">
-                    <span className={`connection-pill ${connected ? "connected" : "disconnected"}`}>{connected ? "connected" : "offline"}</span>
-                    <button
-                      className="publish-routine-button"
-                      type="button"
-                      title={selectedRoutineCode ? `Publish ${selectedRoutineCode} to /Voyager/SelectedAuto` : "Select a routine in the path tree first"}
-                      onClick={publishSelectedRoutine}
-                    >
-                      Publish Routine
-                    </button>
-                  </div>
-                ) : null}
                 <div className="history-actions" aria-label="Editor history controls">
                   <button type="button" onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)">Undo</button>
                   <button type="button" onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Y)">Redo</button>
@@ -4805,7 +5818,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                     Playback
                   </button>
                 </div>
-                <select value={addElementKind} onChange={(event) => setAddElementKind(event.target.value as AddElementKind)}>
+                <select aria-label="Path element type" value={addElementKind} onChange={(event) => setAddElementKind(event.target.value as AddElementKind)}>
                   <option value="waypoint">Waypoint</option>
                   <option value="rotationTarget">Rotation Target</option>
                   <option value="eventTrigger">Event Trigger</option>
@@ -4820,6 +5833,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
               <div
                 ref={fieldOneRef}
                 className={`field-surface ${settings.fieldImageDataUrl ? "has-field-image" : ""} ${pathPlannerActive ? "is-planning" : ""}`}
+                data-measured={fieldOneSize.width > 0 && fieldOneSize.height > 0}
                 style={fieldBackgroundStyle}
                 onClick={selectPlannerPoint}
               >
@@ -4838,7 +5852,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                   const previous = activePathData.waypoints[index];
                   const a = pointToPixels(settings, fieldOneSize, previous);
                   const b = pointToPixels(settings, fieldOneSize, waypoint);
-                  return <line key={`${previous.id}-${waypoint.id}`} className="path-line" x1={a.x} y1={a.y} x2={b.x} y2={b.y} />;
+                  return <line key={`${previous.id}-${waypoint.id}`} data-path-segment-index={index} className="path-line" x1={a.x} y1={a.y} x2={b.x} y2={b.y} />;
                 })}
                 {activePathData.constraintZones.map((zone) => {
                   const points = pathPixelsBetween(settings, fieldOneSize, activePathData.waypoints, zone.startPosition, zone.endPosition);
@@ -4882,6 +5896,9 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                   key={waypoint.id}
                   className="robot-marker waypoint-marker"
                   style={robotRenderStyle(settings, fieldOneSize, waypoint.x, waypoint.y, waypoint.angle)}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Waypoint ${index + 1}. Press Enter to edit; drag to move.`}
                   onPointerDown={(event) => {
                     if (pathPlannerActive) selectPlannerWaypoint(event, waypoint);
                     else beginWaypointDrag(event, waypoint);
@@ -4889,6 +5906,12 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                   onDoubleClick={(event) => {
                     event.stopPropagation();
                     addWaypointAfterIfLast(waypoint);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
+                    event.preventDefault();
+                    const pos = modalPositionFromElement(event.currentTarget);
+                    setModal({ kind: "waypoint", id: waypoint.id, x: pos.x, y: pos.y });
                   }}
                 >
                   <span>{index + 1}</span>
@@ -4904,10 +5927,19 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                     key={target.id}
                     className="robot-marker rotation-target-marker"
                     style={robotRenderStyle(settings, fieldOneSize, point.x, point.y, target.angle)}
+                    role="button"
+                    tabIndex={0}
+                    aria-label="Rotation target. Press Enter to edit; drag to reposition."
                     onPointerDown={(event) => beginPathPositionDrag(event, (position) => updateRotationTarget(target.id, { position }))}
                     onClick={(event) => {
                       event.stopPropagation();
                       const pos = modalPositionFromEvent(event);
+                      setModal({ kind: "rotationTarget", id: target.id, x: pos.x, y: pos.y });
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
+                      event.preventDefault();
+                      const pos = modalPositionFromElement(event.currentTarget);
                       setModal({ kind: "rotationTarget", id: target.id, x: pos.x, y: pos.y });
                     }}
                   >
@@ -4928,6 +5960,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                     type="button"
                     style={{ left: `${pixel.x}px`, top: `${pixel.y}px` }}
                     title={eventTrigger.name}
+                    aria-label={`Event trigger ${eventTrigger.name}. Drag to reposition or activate to edit.`}
                     onPointerDown={(event) => beginPathPositionDrag(event, (position) => updateEventTrigger(eventTrigger.id, { position }))}
                     onClick={(event) => {
                       event.stopPropagation();
@@ -4951,6 +5984,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                       type="button"
                       style={{ left: `${startPixel.x}px`, top: `${startPixel.y}px` }}
                       title={`Start ${zone.startName}`}
+                      aria-label={`Event zone start ${zone.startName}. Drag to reposition or activate to edit.`}
                       onPointerDown={(event) => beginPathPositionDrag(event, (position) => updateEventZone(zone.id, { startPosition: position }))}
                       onClick={(event) => {
                         event.stopPropagation();
@@ -4963,6 +5997,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                       type="button"
                       style={{ left: `${endPixel.x}px`, top: `${endPixel.y}px` }}
                       title={`End ${zone.endName}`}
+                      aria-label={`Event zone end ${zone.endName}. Drag to reposition or activate to edit.`}
                       onPointerDown={(event) => beginPathPositionDrag(event, (position) => updateEventZone(zone.id, { endPosition: position }))}
                       onClick={(event) => {
                         event.stopPropagation();
@@ -4986,6 +6021,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                       className="constraint-handle constraint-handle-start"
                       type="button"
                       style={{ left: `${startPixel.x}px`, top: `${startPixel.y}px` }}
+                      aria-label="Constraint zone start. Drag to reposition or activate to edit."
                       onPointerDown={(event) => beginPathPositionDrag(event, (position) => updateConstraintZone(zone.id, { startPosition: position }))}
                       onClick={(event) => {
                         event.stopPropagation();
@@ -4997,6 +6033,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                       className="constraint-handle constraint-handle-end"
                       type="button"
                       style={{ left: `${endPixel.x}px`, top: `${endPixel.y}px` }}
+                      aria-label="Constraint zone end. Drag to reposition or activate to edit."
                       onPointerDown={(event) => beginPathPositionDrag(event, (position) => updateConstraintZone(zone.id, { endPosition: position }))}
                       onClick={(event) => {
                         event.stopPropagation();
@@ -5007,30 +6044,6 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                   </React.Fragment>
                 );
               })}
-
-              {settings.layoutMode === "focus" ? (
-                <>
-                  {livePoseTrail.length > 1 ? (
-                    <svg className="field-svg live-trail-svg" viewBox={`0 0 ${Math.max(1, fieldOneSize.width)} ${Math.max(1, fieldOneSize.height)}`} aria-hidden="true">
-                      <polyline
-                        className="live-pose-trail"
-                        points={liveTrailFieldOnePoints}
-                      />
-                    </svg>
-                  ) : null}
-                  <div
-                    className="robot-marker live-robot-marker focus-live-robot-marker"
-                    style={robotRenderStyle(settings, fieldOneSize, livePose.x, livePose.y, normalizeCompassDegrees((livePose.rotation * 180) / Math.PI))}
-                    aria-label={connected ? "Connected live robot pose" : "Disconnected robot pose at 0,0"}
-                  >
-                    <SwerveModules
-                      settings={settings}
-                      velocity={liveVelocity}
-                      headingDegrees={normalizeCompassDegrees((livePose.rotation * 180) / Math.PI)}
-                    />
-                  </div>
-                </>
-              ) : null}
 
               {playbackOpen && playbackPose ? (
                 <div
@@ -5046,63 +6059,34 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
             </div>
           </section>
 
-          <section className="field-card live-field-card">
-            <div className="field-toolbar">
-              <div>
-                <h2>Live robot position</h2>
-                <p>{connected ? "Robot connected" : "Robot disconnected — showing origin"}</p>
-              </div>
-              <div className="connection-actions" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <span className={`connection-pill ${connected ? "connected" : "disconnected"}`}>{connected ? "connected" : "offline"}</span>
-                <button
-                  className="publish-routine-button"
-                  type="button"
-                  title={selectedRoutineCode ? `Publish ${selectedRoutineCode} to /Voyager/SelectedAuto` : "Select a routine in the path tree first"}
-                  onClick={publishSelectedRoutine}
-                >
-                  Publish Routine
-                </button>
-              </div>
-            </div>
-            <div className="field-scroll-shell" aria-label="Scrollable live robot field">
-              <div ref={fieldTwoRef} className={`field-surface ${settings.fieldImageDataUrl ? "has-field-image" : ""}`} style={fieldBackgroundStyle}>
-              {!settings.fieldImageDataUrl ? <div className="field-placeholder">Live field<br />{formatNumber(settings.fieldLengthMeters)} × {formatNumber(settings.fieldWidthMeters)} m</div> : null}
-              <div
-                className="origin-label"
-                style={{
-                  left: `${pointToPixels(settings, fieldTwoSize, { x: 0, y: 0 }).x}px`,
-                  top: `${pointToPixels(settings, fieldTwoSize, { x: 0, y: 0 }).y}px`,
-                }}
-              >
-                (0,0)
-              </div>
-              {livePoseTrail.length > 1 ? (
-                <svg className="field-svg live-trail-svg" viewBox={`0 0 ${Math.max(1, fieldTwoSize.width)} ${Math.max(1, fieldTwoSize.height)}`} aria-hidden="true">
-                  <polyline
-                    className="live-pose-trail"
-                    points={liveTrailFieldTwoPoints}
-                  />
-                </svg>
-              ) : null}
-              <div
-                className="robot-marker live-robot-marker"
-                style={robotRenderStyle(settings, fieldTwoSize, livePose.x, livePose.y, normalizeCompassDegrees((livePose.rotation * 180) / Math.PI))}
-              >
-                <SwerveModules
-                  settings={settings}
-                  velocity={liveVelocity}
-                  headingDegrees={normalizeCompassDegrees((livePose.rotation * 180) / Math.PI)}
-                />
-              </div>
-              </div>
-            </div>
-          </section>
         </section>
 
         <div
           className="panel-divider"
           role="separator"
+          tabIndex={settings.layoutMode === "focus" ? -1 : 0}
+          aria-label="Resize the Auto Builder and path tree panels"
           aria-orientation={settings.layoutMode === "horizontal" ? "horizontal" : "vertical"}
+          onKeyDown={(event) => {
+            if (settings.layoutMode === "focus") return;
+            const panel = leftPanelRef.current;
+            const workspace = panel?.parentElement;
+            if (!panel || !workspace) return;
+            const step = event.shiftKey ? 40 : 12;
+            if (settings.layoutMode === "horizontal" && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+              event.preventDefault();
+              const direction = event.key === "ArrowDown" ? 1 : -1;
+              const workspaceHeight = workspace.getBoundingClientRect().height;
+              const nextHeight = clamp(panel.getBoundingClientRect().height + direction * step, 240, workspaceHeight - 220);
+              workspace.style.gridTemplateRows = `${nextHeight}px 8px minmax(220px, 1fr)`;
+            } else if (settings.layoutMode !== "horizontal" && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+              event.preventDefault();
+              const visualDirection = event.key === "ArrowRight" ? 1 : -1;
+              const direction = settings.layoutMode === "mirrored" ? -visualDirection : visualDirection;
+              const workspaceWidth = workspace.getBoundingClientRect().width;
+              panel.style.width = `${clamp(panel.getBoundingClientRect().width + direction * step, 260, workspaceWidth - 320)}px`;
+            }
+          }}
           onPointerDown={(event) => {
             if (settings.layoutMode === "focus") return;
             event.preventDefault();
@@ -5188,8 +6172,15 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
             </div>
           </div>
 
-          <div ref={treeViewportRef} className="tree-viewport" onPointerDown={beginTreePan} onDoubleClick={resetTreePan} onContextMenu={showCanvasMenu}>
-            {visiblePathNodeCount === 0 ? (
+          <div
+            ref={treeViewportRef}
+            className="tree-viewport"
+            data-measured={treeViewportSize.width > 0 && treeViewportSize.height > 0}
+            onPointerDown={beginTreePan}
+            onDoubleClick={resetTreePan}
+            onContextMenu={showCanvasMenu}
+          >
+            {treeViewportSize.width > 0 && treeViewportSize.height > 0 && visiblePathNodeCount === 0 ? (
               <div className="tree-visibility-warning" role="status">
                 <AlertTriangle aria-hidden="true" />
                 <span>{pathTreeNodes.length === 0 ? "No path blocks exist yet." : "No path blocks are visible."}</span>
@@ -5207,7 +6198,27 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
             <button className="tree-resize-handle" type="button" aria-label="Resize path tree" onPointerDown={beginTreeModalResize} />
           ) : null}
         </section>
-      </main>
+      </main> : (
+        <LiveTelemetryWorkspace
+          settings={settings}
+          nt4Address={nt4Address}
+          selectedRoutineCode={selectedRoutineCode}
+          updateSettings={updateSettings}
+          onError={setError}
+          onPublished={handleRoutinePublished}
+        />
+      )}
+
+      <FieldImageCropDialog
+        source={fieldCropSource}
+        fieldAspectRatio={settings.fieldLengthMeters / settings.fieldWidthMeters}
+        onCancel={() => setFieldCropSource(null)}
+        onApply={(croppedDataUrl) => {
+          updateSettings({ fieldImageDataUrl: croppedDataUrl });
+          setFieldCropSource(null);
+          setSaveStatus({ kind: "saved", message: "Cropped and optimized the field image." });
+        }}
+      />
 
       <Dialog open={saveModalOpen} onOpenChange={setSaveModalOpen}>
         <DialogContent className="save-dialog">
@@ -5713,8 +6724,17 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
         <div
           ref={playbackModalRef}
           className="playback-modal"
+          role="dialog"
+          aria-label="Path playback"
+          tabIndex={-1}
           style={{ left: `${playbackModalPosition.x}px`, top: `${playbackModalPosition.y}px` }}
           onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            setPlaybackPlaying(false);
+            setPlaybackOpen(false);
+          }}
         >
           <div className="modal-titlebar draggable" onPointerDown={beginPlaybackModalDrag}>
             <div>
@@ -5795,10 +6815,18 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
 
       {settingsOpen ? (
         <div className="settings-overlay" onClick={() => setSettingsOpen(false)}>
-          <div className="settings-modal" onClick={(event) => event.stopPropagation()}>
+          <div
+            ref={settingsModalRef}
+            className="settings-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-dialog-title"
+            tabIndex={-1}
+            onClick={(event) => event.stopPropagation()}
+          >
             <div className="modal-titlebar">
               <div>
-                <strong>Settings</strong>
+                <strong id="settings-dialog-title">Settings</strong>
                 <span>Field, robot, path constraints, controllers, storage, and save target.</span>
               </div>
               <button type="button" aria-label="Close settings" onClick={() => setSettingsOpen(false)}>×</button>
@@ -5811,6 +6839,8 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                   Field image
                   <input type="file" accept="image/*" onChange={readImageFile} />
                 </label>
+                <p className="path-preview">Every new image opens the crop tool before it is saved.</p>
+                {settings.fieldImageDataUrl ? <button className="full-button" type="button" onClick={() => setFieldCropSource(settings.fieldImageDataUrl)}>Crop current field image</button> : null}
                 <button className="full-button" type="button" onClick={() => void selectRobotCodeProject()}>Select robot code project</button>
                 <p className="path-preview">{settings.robotCodeProjectFolder ? getVoyagerDeployFolder(settings.robotCodeProjectFolder) : "No robot code project selected"}</p>
                 <label>
@@ -5831,7 +6861,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                 </div>
                 <button className="full-button" type="button" onClick={applyNt4Address}>Apply NT4 address</button>
                 <p className="path-preview">Examples: 4188, 1678, localhost, 10.41.88.2, roboRIO-4188-FRC.local</p>
-                <p className="path-preview">Current NT4 provider: {describeNt4Address(nt4Address)}</p>
+                <p className="path-preview">Current NT4 endpoint: {describeNt4Address(nt4Address)}</p>
                 <label>
                   Field width (m)
                   <input type="number" step="0.01" value={settings.fieldWidthMeters} onChange={(event) => updateSettings({ fieldWidthMeters: safePositive(Number(event.target.value), DEFAULT_SETTINGS.fieldWidthMeters) })} />
@@ -5987,7 +7017,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                   </div>
                   <label>
                     Default intermediate handoff radius (m)
-                    <input type="number" min="0.001" step="0.01" value={settings.defaultIntermediateHandOffRadiusMeters} onChange={(event) => updateSettings({ defaultIntermediateHandOffRadiusMeters: safePositive(Number(event.target.value), DEFAULT_SETTINGS.defaultIntermediateHandOffRadiusMeters) })} />
+                    <input type="number" min="0.01" max={maxHandoffRadiusMeters(settings.fieldLengthMeters, settings.fieldWidthMeters)} step="0.01" value={settings.defaultIntermediateHandOffRadiusMeters} onChange={(event) => updateSettings({ defaultIntermediateHandOffRadiusMeters: clamp(safePositive(Number(event.target.value), DEFAULT_SETTINGS.defaultIntermediateHandOffRadiusMeters), 0.01, maxHandoffRadiusMeters(settings.fieldLengthMeters, settings.fieldWidthMeters)) })} />
                   </label>
                   <p className="settings-help">New waypoints use this radius. Each waypoint’s Handoff field can override it.</p>
 
@@ -6043,7 +7073,20 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       ) : null}
 
       {modal ? (
-        <div ref={elementModalRef} className="element-modal" style={{ left: `${modal.x}px`, top: `${modal.y}px` }} onClick={(event) => event.stopPropagation()}>
+        <div
+          ref={elementModalRef}
+          className="element-modal"
+          role="dialog"
+          aria-label={`${modal.kind === "waypoint" ? "Waypoint" : modal.kind === "rotationTarget" ? "Rotation target" : modal.kind === "eventTrigger" ? "Event trigger" : modal.kind === "eventZone" ? "Event zone" : "Constraint zone"} editor`}
+          tabIndex={-1}
+          style={{ left: `${modal.x}px`, top: `${modal.y}px` }}
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            setModal(null);
+          }}
+        >
           <div className="modal-titlebar draggable" onPointerDown={beginModalDrag}>
             <div>
               <strong>{modal.kind === "waypoint" ? "Waypoint" : modal.kind === "rotationTarget" ? "Rotation Target" : modal.kind === "eventTrigger" ? "Event Trigger" : modal.kind === "eventZone" ? "Event Zone" : "Constraint Zone"}</strong>
@@ -6057,7 +7100,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
               <label>X (m)<input type="number" step="0.01" value={formatNumber(activeWaypointModal.x, 3)} onChange={(event) => updateWaypoint(activeWaypointModal.id, { x: clamp(cleanNumber(Number(event.target.value), 0), 0, settings.fieldLengthMeters) })} /></label>
               <label>Y (m)<input type="number" step="0.01" value={formatNumber(activeWaypointModal.y, 3)} onChange={(event) => updateWaypoint(activeWaypointModal.id, { y: clamp(cleanNumber(Number(event.target.value), 0), 0, settings.fieldWidthMeters) })} /></label>
               <label>Rotation (°)<input type="number" step="1" value={formatNumber(normalizeCompassDegrees(activeWaypointModal.angle), 2)} onChange={(event) => updateWaypoint(activeWaypointModal.id, { angle: normalizeCompassDegrees(cleanNumber(Number(event.target.value), 0)) })} /></label>
-              <label>Handoff (m)<input type="number" step="0.01" value={formatNumber(activeWaypointModal.handoff, 3)} onChange={(event) => updateWaypoint(activeWaypointModal.id, { handoff: safePositive(Number(event.target.value), settings.defaultIntermediateHandOffRadiusMeters) })} /></label>
+              <label>Handoff (m)<input type="number" min="0.01" max={maxHandoffRadiusMeters(settings.fieldLengthMeters, settings.fieldWidthMeters)} step="0.01" value={formatNumber(activeWaypointModal.handoff, 3)} onChange={(event) => updateWaypoint(activeWaypointModal.id, { handoff: clamp(safePositive(Number(event.target.value), settings.defaultIntermediateHandOffRadiusMeters), 0.01, maxHandoffRadiusMeters(settings.fieldLengthMeters, settings.fieldWidthMeters)) })} /></label>
               <label className="checkbox-row"><input type="checkbox" checked={activeWaypointModal.profiled} onChange={(event) => updateWaypoint(activeWaypointModal.id, { profiled: event.target.checked })} />Profiled</label>
               <button className="danger full-button" type="button" onClick={() => deleteWaypoint(activeWaypointModal.id)}>Delete waypoint</button>
             </div>
