@@ -8,7 +8,7 @@
   A visual desktop autonomous builder for FIRST Robotics Competition teams.
 </p>
 
-Voyager lets an FRC team build an autonomous routine as a branching tree, draw and tune each path on a field, plan collision-free routes around measured obstacles, preview the robot's motion, save the complete workspace into a WPILib project, and publish the selected routine to the robot over NT4. This guide covers the Voyager 3.3.2-alpha workflow.
+Voyager lets an FRC team build an autonomous routine as a branching tree, draw and tune each path on a field, plan collision-free routes around measured obstacles, preview the robot's motion, save the complete workspace into a WPILib project, and publish the selected routine to the robot over NT4. This guide covers the Voyager 3.3.3-alpha workflow.
 
 ## Contents
 
@@ -36,8 +36,8 @@ Download Voyager from the repository's [GitHub Releases](https://github.com/Priy
 
 | Package | Best for |
 | --- | --- |
-| `Voyager Setup 3.3.2-alpha.exe` | Normal Windows installation |
-| `Voyager 3.3.2-alpha.exe` | Running Voyager without installing it |
+| `Voyager Setup 3.3.3-alpha.exe` | Normal Windows installation |
+| `Voyager 3.3.3-alpha.exe` | Running Voyager without installing it |
 
 The Windows packages are not digitally code-signed, so SmartScreen may show an **Unknown publisher** warning. Only run packages obtained from the official repository.
 
@@ -516,8 +516,8 @@ npm run dist
 
 ```text
 release/
-|-- Voyager Setup 3.3.2-alpha.exe
-`-- Voyager 3.3.2-alpha.exe
+|-- Voyager Setup 3.3.3-alpha.exe
+`-- Voyager 3.3.3-alpha.exe
 ```
 
 Before publishing a release, update the version in `package.json`, build both packages, smoke-test the packaged app, update the release notes, and attach the executables to a GitHub Release.
@@ -528,11 +528,11 @@ Before publishing a release, update the version in `package.json`, build both pa
 Voyager/
 |-- assets/                  Application imagery and icons
 |-- electron/                Electron main process and preload bridge
+|-- scripts/                 UI, telemetry, persistence, and release tests
 |-- src/                     React application and styles
+|-- markdowns/               Local ignored release notes and audits
 |-- electron.vite.config.ts  Electron/Vite build configuration
-|-- package.json             Scripts, dependencies, and packaging settings
-|-- RELEASE_NOTES_v3.3.2-alpha.md  Current release notes
-`-- QUALITY_AUDIT_v3.3.2-alpha.md   Pass-by-pass release scores
+`-- package.json             Scripts, dependencies, and packaging settings
 ```
 
 ### Technology

@@ -510,7 +510,7 @@ const DB_NAME = "voyager-autonomous-builder";
 const DB_VERSION = 1;
 const DB_STORE = "kv";
 const APP_STATE_KEY = "app-state";
-const VOYAGER_VERSION = "3.3.2-alpha";
+const VOYAGER_VERSION = "3.3.3-alpha";
 const PROJECT_METADATA_FILE = "metadata.json";
 const NODE_WIDTH = 160;
 const NODE_HEIGHT = 62;
@@ -3326,9 +3326,21 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     };
   }, [fieldCropSource, settingsOpen]);
 
+  useLayoutEffect(() => {
+    if (!modal) return;
+    const appRect = appRef.current?.getBoundingClientRect();
+    const modalElement = elementModalRef.current;
+    if (!appRect || !modalElement) return;
+    const modalRect = modalElement.getBoundingClientRect();
+    const nextX = clamp(modal.x, 8, Math.max(8, appRect.width - modalRect.width - 8));
+    const nextY = clamp(modal.y, 48, Math.max(48, appRect.height - modalRect.height - 8));
+    if (Math.abs(nextX - modal.x) < 0.5 && Math.abs(nextY - modal.y) < 0.5) return;
+    setModal((current) => current ? { ...current, x: nextX, y: nextY } : current);
+  }, [modal]);
+
   useEffect(() => {
     if (!modal) return;
-    const focusFrame = window.requestAnimationFrame(() => elementModalRef.current?.focus());
+    const focusFrame = window.requestAnimationFrame(() => elementModalRef.current?.focus({ preventScroll: true }));
     return () => window.cancelAnimationFrame(focusFrame);
   }, [modal]);
 
@@ -4398,6 +4410,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
 
   const beginWaypointDrag = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>, waypoint: Waypoint): void => {
+      event.preventDefault();
       if (fieldOneSize.width <= 0 || fieldOneSize.height <= 0) return;
       const fieldElement = fieldOneRef.current;
       if (!fieldElement) return;
@@ -4464,6 +4477,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
 
   const beginWaypointRotate = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>, waypoint: Waypoint): void => {
+      event.preventDefault();
       event.stopPropagation();
       if (fieldOneSize.width <= 0 || fieldOneSize.height <= 0) return;
       const fieldRect = fieldOneRef.current?.getBoundingClientRect();
@@ -4942,8 +4956,8 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     const pointerFrame = createPointerFrameScheduler((clientX, clientY) => {
       const offset = draggingModalRef.current;
       if (!offset) return;
-      nextX = clamp(clientX - appRect.left - offset.offsetX, 4, appRect.width - 260);
-      nextY = clamp(clientY - appRect.top - offset.offsetY, 44, appRect.height - 120);
+      nextX = clamp(clientX - appRect.left - offset.offsetX, 4, Math.max(4, appRect.width - modalElement.offsetWidth - 4));
+      nextY = clamp(clientY - appRect.top - offset.offsetY, 44, Math.max(44, appRect.height - modalElement.offsetHeight - 4));
       modalElement.style.transform = `translate3d(${nextX - modal.x}px, ${nextY - modal.y}px, 0)`;
     });
     const onPointerMove = (moveEvent: PointerEvent): void => pointerFrame.schedule(moveEvent.clientX, moveEvent.clientY);

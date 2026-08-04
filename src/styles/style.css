@@ -1187,6 +1187,9 @@ label {
 .element-modal {
   position: absolute;
   width: 270px;
+  max-height: calc(100% - 56px);
+  display: flex;
+  flex-direction: column;
   z-index: 450;
   overflow: hidden;
 }
@@ -1195,7 +1198,10 @@ label {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-height: 0;
   padding: 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .modal-body.grid-two {
@@ -1452,6 +1458,7 @@ select:focus {
   width: 100%;
   max-height: min(46vh, 430px);
   overflow: auto;
+  overflow-anchor: none;
   border: 1px solid color-mix(in srgb, var(--border-strong) 70%, transparent);
   border-radius: 13px;
   background: color-mix(in srgb, var(--bg) 82%, var(--panel));

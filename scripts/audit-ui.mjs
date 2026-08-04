@@ -115,10 +115,57 @@ app.whenReady().then(async () => {
     await wait();
 
     const firstWaypoint = requireElement('.auto-field-card .waypoint-marker');
-    firstWaypoint.focus();
+    const waypointScrollTargets = [
+      document.scrollingElement,
+      document.querySelector('.voyager-app'),
+      document.querySelector('.workspace'),
+      document.querySelector('.left-panel'),
+      document.querySelector('.field-scroll-shell'),
+    ].filter(Boolean);
+    waypointScrollTargets.forEach((element) => {
+      element.scrollTop = 0;
+      element.scrollLeft = 0;
+    });
+    const scrollBeforeWaypointEditor = waypointScrollTargets.map((element) => ({
+      left: element.scrollLeft,
+      top: element.scrollTop,
+    }));
+    firstWaypoint.focus({ preventScroll: true });
     firstWaypoint.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await wait();
-    checks.keyboardWaypointEditor = Boolean(document.querySelector('.element-modal[role="dialog"]'));
+    const waypointEditor = document.querySelector('.element-modal[role="dialog"]');
+    const waypointEditorRect = waypointEditor?.getBoundingClientRect();
+    const scrollAfterWaypointEditor = waypointScrollTargets.map((element) => ({
+      left: element.scrollLeft,
+      top: element.scrollTop,
+    }));
+    checks.keyboardWaypointEditor = Boolean(waypointEditor);
+    checks.waypointEditorDoesNotScroll = scrollAfterWaypointEditor.every((position, index) => (
+      position.left === scrollBeforeWaypointEditor[index].left
+      && position.top === scrollBeforeWaypointEditor[index].top
+    ));
+    checks.waypointEditorFitsViewport = Boolean(waypointEditorRect
+      && waypointEditorRect.left >= 0
+      && waypointEditorRect.top >= 0
+      && waypointEditorRect.right <= innerWidth
+      && waypointEditorRect.bottom <= innerHeight);
+    const waypointXInput = waypointEditor?.querySelector('input[type="number"]');
+    if (waypointXInput) {
+      waypointXInput.focus();
+      valueSetter.call(waypointXInput, String(Number(waypointXInput.value) + 0.01));
+      waypointXInput.dispatchEvent(new Event('input', { bubbles: true }));
+      waypointXInput.dispatchEvent(new Event('change', { bubbles: true }));
+      await wait();
+    }
+    const scrollAfterWaypointInput = waypointScrollTargets.map((element) => ({
+      left: element.scrollLeft,
+      top: element.scrollTop,
+    }));
+    checks.waypointInputEditDoesNotScroll = Boolean(waypointXInput)
+      && scrollAfterWaypointInput.every((position, index) => (
+        position.left === scrollBeforeWaypointEditor[index].left
+        && position.top === scrollBeforeWaypointEditor[index].top
+      ));
     document.querySelector('[aria-label="Close modal"]')?.click();
     await wait();
 
