@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) 2026 Priyanshu Biswal
+ * SPDX-License-Identifier: MIT
+ */
+
 import { decodeMulti, encode } from "@msgpack/msgpack";
 
 export interface DirectNt4Topic {

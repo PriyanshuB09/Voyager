@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) 2026 Priyanshu Biswal
+ * SPDX-License-Identifier: MIT
+ */
+
 import React, { useCallback, useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";

@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) 2026 Priyanshu Biswal
+ * SPDX-License-Identifier: MIT
+ */
+
 import { encode } from "@msgpack/msgpack";
 import { app, BrowserWindow } from "electron";
 import { mkdir, writeFile } from "node:fs/promises";
