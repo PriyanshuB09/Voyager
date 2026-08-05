@@ -87,6 +87,12 @@ app.whenReady().then(async () => {
     await wait();
     checks.liveField = Boolean(requireElement('.live-workspace .live-tab-field'));
     checks.topicPickers = document.querySelectorAll('.topic-picker').length === 4;
+    const pathOverlayToggle = requireElement('.live-path-overlay-toggle');
+    checks.livePathOverlayOption = !pathOverlayToggle.disabled;
+    pathOverlayToggle.click();
+    await wait();
+    checks.livePathOverlay = Boolean(requireElement('[data-path-overlay="true"] .live-planned-path'))
+      && document.querySelectorAll('[data-path-overlay="true"] .live-planned-path-waypoint').length === 2;
     const transportButtons = document.querySelectorAll('.transport-switch button');
     checks.transportSwitch = transportButtons.length === 2;
     transportButtons.item(1).click();

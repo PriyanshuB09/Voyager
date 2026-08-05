@@ -175,6 +175,7 @@ interface Settings {
   designPreset: DesignPresetId;
   showObstacleZones: boolean;
   showHandoffRadii: boolean;
+  showLivePathOverlay: boolean;
   telemetryTransport: TelemetryTransport;
   driverStationTopic: string;
   odometryTopic: string;
@@ -510,7 +511,7 @@ const DB_NAME = "voyager-autonomous-builder";
 const DB_VERSION = 1;
 const DB_STORE = "kv";
 const APP_STATE_KEY = "app-state";
-const VOYAGER_VERSION = "3.3.3-alpha";
+const VOYAGER_VERSION = "3.3.4";
 const PROJECT_METADATA_FILE = "metadata.json";
 const NODE_WIDTH = 160;
 const NODE_HEIGHT = 62;
@@ -795,6 +796,7 @@ const DEFAULT_SETTINGS: Settings = {
   designPreset: DEFAULT_DESIGN.id,
   showObstacleZones: true,
   showHandoffRadii: true,
+  showLivePathOverlay: false,
   telemetryTransport: DEFAULT_TELEMETRY_CONFIGURATION.transport,
   driverStationTopic: DEFAULT_TELEMETRY_CONFIGURATION.driverStationTopic,
   odometryTopic: DEFAULT_TELEMETRY_CONFIGURATION.odometryTopic,
@@ -2238,6 +2240,9 @@ function normalizePersistedState(value: PersistedAppState | null): PersistedAppS
       showHandoffRadii: typeof storedSettings.showHandoffRadii === "boolean"
         ? storedSettings.showHandoffRadii
         : DEFAULT_SETTINGS.showHandoffRadii,
+      showLivePathOverlay: typeof storedSettings.showLivePathOverlay === "boolean"
+        ? storedSettings.showLivePathOverlay
+        : DEFAULT_SETTINGS.showLivePathOverlay,
       telemetryTransport: storedSettings.telemetryTransport === "frc-web-components"
         ? "frc-web-components"
         : "direct",
@@ -2670,6 +2675,51 @@ function LiveRobotOverlay({ settings, fieldSize }: LiveRobotOverlayProps): React
   );
 }
 
+interface LivePathOverlayProps {
+  settings: Settings;
+  fieldSize: FieldSize;
+  pathName: string;
+  path: SharedPathData;
+}
+
+function LivePathOverlay({ settings, fieldSize, pathName, path }: LivePathOverlayProps): ReactElement | null {
+  const points = useMemo(
+    () => path.waypoints.map((waypoint) => pointToPixels(settings, fieldSize, waypoint)),
+    [fieldSize, path.waypoints, settings],
+  );
+  if (fieldSize.width <= 0 || fieldSize.height <= 0 || points.length === 0) return null;
+
+  const viewBox = `0 0 ${Math.max(1, fieldSize.width)} ${Math.max(1, fieldSize.height)}`;
+  const polylinePoints = points.map((point) => `${point.x},${point.y}`).join(" ");
+  return (
+    <svg
+      className="field-svg live-planned-path-overlay"
+      data-path-overlay="true"
+      viewBox={viewBox}
+      role="img"
+      aria-label={`Planned path overlay for ${pathName}`}
+    >
+      <defs>
+        <marker id="live-planned-path-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path className="live-planned-path-arrowhead" d="M 0 0 L 6 3 L 0 6 z" />
+        </marker>
+      </defs>
+      {points.length > 1 ? <polyline className="live-planned-path" points={polylinePoints} markerEnd="url(#live-planned-path-arrow)" /> : null}
+      {points.map((point, index) => (
+        <circle
+          key={path.waypoints[index].id}
+          className={`live-planned-path-waypoint ${index === 0 ? "is-start" : ""} ${index === points.length - 1 ? "is-end" : ""}`}
+          cx={point.x}
+          cy={point.y}
+          r={index === 0 || index === points.length - 1 ? 4 : 2.75}
+        />
+      ))}
+    </svg>
+  );
+}
+
+const StableLivePathOverlay = React.memo(LivePathOverlay);
+
 interface TopicTreeNode {
   name: string;
   path: string;
@@ -2843,6 +2893,8 @@ interface LiveTelemetryWorkspaceProps {
   settings: Settings;
   nt4Address: string;
   selectedRoutineCode: string | null;
+  activePathName: string | null;
+  activePathData: SharedPathData;
   updateSettings: (patch: Partial<Settings>) => void;
   onError: (message: string) => void;
   onPublished: (routineCode: string) => void;
@@ -2852,6 +2904,8 @@ function LiveTelemetryWorkspace({
   settings,
   nt4Address,
   selectedRoutineCode,
+  activePathName,
+  activePathData,
   updateSettings,
   onError,
   onPublished,
@@ -2863,6 +2917,7 @@ function LiveTelemetryWorkspace({
     backgroundImage: settings.fieldImageDataUrl ? `url(${settings.fieldImageDataUrl})` : undefined,
   }), [settings.fieldImageDataUrl, settings.fieldLengthMeters, settings.fieldWidthMeters]);
   const speedValue = (value: number): string => Number.isFinite(value) ? value.toFixed(2) : "—";
+  const hasActivePathOverlay = Boolean(activePathName && activePathData.waypoints.length > 0);
 
   return (
     <main className="live-workspace" data-workspace-tab="live">
@@ -2908,6 +2963,14 @@ function LiveTelemetryWorkspace({
             >
               (0,0)
             </div>
+            {settings.showLivePathOverlay && activePathName && hasActivePathOverlay ? (
+              <StableLivePathOverlay
+                settings={settings}
+                fieldSize={fieldSize}
+                pathName={activePathName}
+                path={activePathData}
+              />
+            ) : null}
             <LiveRobotOverlay settings={settings} fieldSize={fieldSize} />
           </div>
         </div>
@@ -2945,6 +3008,27 @@ function LiveTelemetryWorkspace({
             : "Compatibility client using FRC Web Components’ NT4 implementation."}</p>
           {telemetry.transportError ? <div className="transport-error">{telemetry.transportError}</div> : null}
           <div className="topic-count"><strong>{telemetry.topics.length}</strong><span>announced topics discovered</span></div>
+        </section>
+
+        <section className="telemetry-config-card live-path-overlay-card">
+          <div className="config-section-heading">
+            <div><span className="eyebrow">Field view</span><h2>Path overlay</h2></div>
+            <button
+              type="button"
+              className={`live-path-overlay-toggle ${settings.showLivePathOverlay ? "is-active" : ""}`}
+              aria-pressed={settings.showLivePathOverlay}
+              disabled={!hasActivePathOverlay}
+              title={hasActivePathOverlay
+                ? `${settings.showLivePathOverlay ? "Hide" : "Show"} the active Auto builder path on the live field`
+                : "Open a path in Auto builder to enable its live overlay"}
+              onClick={() => updateSettings({ showLivePathOverlay: !settings.showLivePathOverlay })}
+            >
+              {settings.showLivePathOverlay ? "Hide path" : "Show path"}
+            </button>
+          </div>
+          <p>{hasActivePathOverlay
+            ? `Shows ${activePathName} behind the live robot without affecting telemetry or publishing.`
+            : "Open a path in Auto builder to compare its planned route with the live robot."}</p>
         </section>
 
         <section className="telemetry-config-card topic-config-card">
@@ -6217,6 +6301,8 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
           settings={settings}
           nt4Address={nt4Address}
           selectedRoutineCode={selectedRoutineCode}
+          activePathName={activePathName}
+          activePathData={activePathData}
           updateSettings={updateSettings}
           onError={setError}
           onPublished={handleRoutinePublished}

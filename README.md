@@ -8,7 +8,7 @@
   A visual desktop autonomous builder for FIRST Robotics Competition teams.
 </p>
 
-Voyager lets an FRC team build an autonomous routine as a branching tree, draw and tune each path on a field, plan collision-free routes around measured obstacles, preview the robot's motion, save the complete workspace into a WPILib project, and publish the selected routine to the robot over NT4. This guide covers the Voyager 3.3.3-alpha workflow.
+Voyager lets an FRC team build an autonomous routine as a branching tree, draw and tune each path on a field, plan collision-free routes around measured obstacles, preview the robot's motion, save the complete workspace into a WPILib project, and publish the selected routine to the robot over NT4. This guide covers the Voyager 3.3.4 workflow.
 
 ## Contents
 
@@ -36,8 +36,8 @@ Download Voyager from the repository's [GitHub Releases](https://github.com/Priy
 
 | Package | Best for |
 | --- | --- |
-| `Voyager Setup 3.3.3-alpha.exe` | Normal Windows installation |
-| `Voyager 3.3.3-alpha.exe` | Running Voyager without installing it |
+| `Voyager Setup 3.3.4.exe` | Normal Windows installation |
+| `Voyager 3.3.4.exe` | Running Voyager without installing it |
 
 The Windows packages are not digitally code-signed, so SmartScreen may show an **Unknown publisher** warning. Only run packages obtained from the official repository.
 
@@ -103,7 +103,7 @@ The field keeps its configured aspect ratio. If a panel becomes narrower than it
 
 ### Live robot position
 
-The **Live robot** tab displays the live NT4 robot pose, connection state, persistent trail, ChassisSpeeds diagnostics, and **Publish Routine** button. Its source sidebar discovers the server's announced topic hierarchy and lets each telemetry input be selected or entered manually. When disconnected, the robot is shown at `(0,0)`.
+The **Live robot** tab displays the live NT4 robot pose, connection state, persistent trail, ChassisSpeeds diagnostics, an optional active-path overlay, and **Publish Routine** button. Its source sidebar discovers the server's announced topic hierarchy and lets each telemetry input be selected or entered manually. When disconnected, the robot is shown at `(0,0)`.
 
 ### Path tree
 
@@ -328,6 +328,8 @@ When a routine is published, Voyager begins a persistent pose trail at the curre
 
 The playback robot and live robot are separate overlays: playback visualizes the planned path, while the live pose represents robot telemetry.
 
+Use **Path overlay** in the Live robot sidebar to show the path currently open in Auto builder behind the real robot. The dashed route has a green start marker and yellow end marker, stays below the live trail and robot, and does not affect telemetry, path files, or publishing. The option is available after opening a path block in Auto builder and is remembered with the rest of Voyager's settings.
+
 ## Select and publish a routine
 
 1. Right-click a block in the intended routine.
@@ -516,8 +518,8 @@ npm run dist
 
 ```text
 release/
-|-- Voyager Setup 3.3.3-alpha.exe
-`-- Voyager 3.3.3-alpha.exe
+|-- Voyager Setup 3.3.4.exe
+`-- Voyager 3.3.4.exe
 ```
 
 Before publishing a release, update the version in `package.json`, build both packages, smoke-test the packaged app, update the release notes, and attach the executables to a GitHub Release.

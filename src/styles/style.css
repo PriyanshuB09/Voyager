@@ -4100,6 +4100,42 @@ label {
   background-size: contain;
 }
 
+.live-planned-path-overlay {
+  z-index: 9;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.live-planned-path {
+  fill: none;
+  stroke: color-mix(in srgb, var(--accent) 82%, white);
+  stroke-width: 2.5;
+  stroke-dasharray: 8 5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 54%, transparent));
+}
+
+.live-planned-path-arrowhead {
+  fill: color-mix(in srgb, var(--accent) 82%, white);
+}
+
+.live-planned-path-waypoint {
+  fill: var(--panel);
+  stroke: color-mix(in srgb, var(--accent) 82%, white);
+  stroke-width: 1.5;
+}
+
+.live-planned-path-waypoint.is-start {
+  fill: var(--success);
+  stroke: color-mix(in srgb, var(--success) 72%, white);
+}
+
+.live-planned-path-waypoint.is-end {
+  fill: var(--warn);
+  stroke: color-mix(in srgb, var(--warn) 72%, white);
+}
+
 .chassis-speed-overlay {
   z-index: 32;
   overflow: visible;
@@ -4219,6 +4255,39 @@ label {
   border: 1px solid var(--border);
   border-radius: 9px;
   background: var(--panel);
+}
+
+.live-path-overlay-card {
+  display: grid;
+  gap: 9px;
+}
+
+.live-path-overlay-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.live-path-overlay-toggle {
+  min-height: 30px;
+  padding: 0 10px;
+  border-color: var(--border-strong);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.live-path-overlay-toggle.is-active {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel-2));
+  color: var(--text);
+}
+
+.live-path-overlay-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .config-section-heading {

@@ -298,6 +298,7 @@ export function TelemetryProvider({ address, children }: TelemetryProviderProps)
   const frameRef = useRef<number | null>(null);
   const topicCommitTimerRef = useRef<number | null>(null);
   const topicMapRef = useRef(new Map<string, TelemetryTopicInfo>());
+  const topicConnectionKeyRef = useRef<string | null>(null);
   const transportReadyRef = useRef<Promise<ActiveTelemetryTransport | null> | null>(null);
 
   const configure = useCallback((next: TelemetryConfiguration): void => {
@@ -401,8 +402,12 @@ export function TelemetryProvider({ address, children }: TelemetryProviderProps)
 
   useEffect(() => {
     let disposed = false;
-    topicMapRef.current = new Map();
-    setTopics([]);
+    const topicConnectionKey = `${configuration.transport}\u0000${address}`;
+    if (topicConnectionKeyRef.current !== topicConnectionKey) {
+      topicConnectionKeyRef.current = topicConnectionKey;
+      topicMapRef.current = new Map();
+      setTopics([]);
+    }
     setTransportError(null);
     latestServerConnectedRef.current = false;
     latestDsAttachedRef.current = false;
@@ -442,8 +447,12 @@ export function TelemetryProvider({ address, children }: TelemetryProviderProps)
           if (!connected) latestDsAttachedRef.current = false;
           scheduleTelemetryCommit();
         },
-        onTopicAnnounce: (topic) => upsertTopic(topic.name, topic.type),
-        onTopicUnannounce: (topic) => removeTopic(topic.name),
+        onTopicAnnounce: (topic) => {
+          if (!disposed) upsertTopic(topic.name, topic.type);
+        },
+        onTopicUnannounce: (topic) => {
+          if (!disposed) removeTopic(topic.name);
+        },
         onTopicValue: (topic, value) => acceptTopicValue(topic.name, value),
       });
       client.connect();
@@ -467,8 +476,12 @@ export function TelemetryProvider({ address, children }: TelemetryProviderProps)
         client = new Nt4Client(
           host,
           "Voyager",
-          (topic) => upsertTopic(topic.name, topic.type),
-          (topic) => removeTopic(topic.name),
+          (topic) => {
+            if (!disposed) upsertTopic(topic.name, topic.type);
+          },
+          (topic) => {
+            if (!disposed) removeTopic(topic.name);
+          },
           (topic, _timestamp, value) => {
             if (activeClient === client) acceptTopicValue(topic.name, value);
           },

@@ -113,13 +113,17 @@ app.whenReady().then(async () => {
       await wait(60);
       const search = picker.querySelector('.topic-browser-toolbar input');
       setReactInput(search, topicName);
-      await wait(80);
-      const result = [...picker.querySelectorAll('.topic-search-result')].find((button) => button.textContent.includes(topicName));
-      if (!result) throw new Error('Topic browser did not find ' + topicName);
+      let result = null;
+      const found = await waitFor(() => {
+        result = [...picker.querySelectorAll('.topic-search-result')].find((button) => button.textContent.includes(topicName)) ?? null;
+        return Boolean(result);
+      }, 3000);
+      if (!found || !result) throw new Error('Topic browser did not find ' + topicName);
       result.click();
       await wait(120);
     };
     await selectTopic(2, '/Swerve/MeasuredChassisSpeeds');
+    const topicsRemainAvailableAfterSourceChange = Number(document.querySelector('.topic-count strong')?.textContent ?? 0) >= 4;
     await selectTopic(3, '/Swerve/SetpointChassisSpeeds');
 
     const directAnomaly = await waitFor(() => document.querySelector('.traction-banner.is-anomaly'));
@@ -142,8 +146,8 @@ app.whenReady().then(async () => {
     const recoveredFrame = !document.querySelector('.live-robot-marker.is-anomaly');
 
     return {
-      checks: { directConnected, directTopics, directAnomaly, directFrame, directTrail, measuredVector, setpointVector, speedLegend, fwcSelected, fwcConnected, fwcTopics, fwcAnomaly, fwcRecovered, recoveredFrame },
-      passed: [directConnected, directTopics, directAnomaly, directFrame, directTrail, measuredVector, setpointVector, speedLegend, fwcSelected, fwcConnected, fwcTopics, fwcAnomaly, fwcRecovered, recoveredFrame].every(Boolean),
+      checks: { directConnected, directTopics, topicsRemainAvailableAfterSourceChange, directAnomaly, directFrame, directTrail, measuredVector, setpointVector, speedLegend, fwcSelected, fwcConnected, fwcTopics, fwcAnomaly, fwcRecovered, recoveredFrame },
+      passed: [directConnected, directTopics, topicsRemainAvailableAfterSourceChange, directAnomaly, directFrame, directTrail, measuredVector, setpointVector, speedLegend, fwcSelected, fwcConnected, fwcTopics, fwcAnomaly, fwcRecovered, recoveredFrame].every(Boolean),
       topicCount: Number(document.querySelector('.topic-count strong')?.textContent ?? 0),
       status: document.querySelector('.traction-banner strong')?.textContent ?? null,
     };
