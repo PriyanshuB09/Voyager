@@ -516,7 +516,7 @@ const DB_NAME = "voyager-autonomous-builder";
 const DB_VERSION = 1;
 const DB_STORE = "kv";
 const APP_STATE_KEY = "app-state";
-const VOYAGER_VERSION = "3.3.4";
+const VOYAGER_VERSION = "3.4.0";
 const PROJECT_METADATA_FILE = "metadata.json";
 const NODE_WIDTH = 160;
 const NODE_HEIGHT = 62;
@@ -6347,6 +6347,25 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
               <button type="button" className="save-action-card" onClick={() => void saveMetadataNow()}>
                 <strong>Save metadata now</strong>
                 <span>Write the full workspace and version history without exporting routine files.</span>
+              </button>
+            </section>
+            <section className="save-metadata-import" aria-label="Import robot code metadata">
+              <div className="save-metadata-import-copy">
+                <strong>Import robot code metadata</strong>
+                <span>Load the complete Voyager workspace saved for this robot project.</span>
+                <small>
+                  {settings.robotCodeProjectFolder
+                    ? `${getVoyagerAssetsFolder(settings.robotCodeProjectFolder)}\\${PROJECT_METADATA_FILE}`
+                    : "Select a robot code project in Settings to enable metadata import."}
+                </small>
+              </div>
+              <button
+                type="button"
+                className="save-metadata-import-button"
+                disabled={!settings.robotCodeProjectFolder}
+                onClick={() => void importProjectMetadata()}
+              >
+                Import metadata
               </button>
             </section>
             <section className="save-options" aria-label="Automatic save and publish options">

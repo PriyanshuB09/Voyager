@@ -2878,6 +2878,24 @@ select:focus {
 .save-option-row strong { color: var(--text); font-size: 11px; }
 .save-option-row small { color: var(--muted); font-size: 9px; line-height: 1.4; }
 
+.save-metadata-import {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 13px;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  border-radius: var(--design-radius-md, 10px);
+  background: color-mix(in srgb, var(--accent) 7%, var(--panel-2));
+}
+
+.save-metadata-import-copy { display: grid; gap: 4px; min-width: 0; }
+.save-metadata-import-copy strong { color: var(--accent); font-size: 11px; }
+.save-metadata-import-copy span { color: var(--muted); font-size: 9px; line-height: 1.45; }
+.save-metadata-import-copy small { color: var(--faint); font-family: var(--design-font-mono, ui-monospace); font-size: 8px; line-height: 1.4; overflow-wrap: anywhere; }
+.save-metadata-import-button { min-height: 34px; padding: 0 12px; border-color: color-mix(in srgb, var(--accent) 62%, var(--border)); color: var(--accent); font-size: 10px; font-weight: 800; }
+.save-metadata-import-button:disabled { cursor: not-allowed; opacity: 0.48; }
+
 .save-project-location {
   display: grid;
   gap: 4px;
