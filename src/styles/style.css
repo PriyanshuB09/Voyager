@@ -63,7 +63,8 @@
 
 input:not([type]),
 input[type="text"],
-input[type="number"] {
+input[type="number"],
+textarea {
   user-select: text;
   -webkit-user-select: text;
 }
@@ -811,6 +812,25 @@ label {
   user-select: none;
 }
 
+.tree-auto-name-label {
+  position: absolute;
+  left: 0;
+  top: -27px;
+  max-width: 260px;
+  overflow: hidden;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 48%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 .tree-node strong {
   font-size: 13px;
   line-height: 1;
@@ -1192,6 +1212,52 @@ label {
   flex-direction: column;
   z-index: 450;
   overflow: hidden;
+}
+
+.auto-name-modal {
+  position: absolute;
+  z-index: 480;
+  width: min(320px, calc(100% - 16px));
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--design-radius-lg, 14px);
+  background: color-mix(in srgb, var(--panel) 96%, transparent);
+  box-shadow: var(--shadow);
+}
+
+.auto-name-modal.is-dragging {
+  transition: none;
+  will-change: transform;
+}
+
+.auto-name-modal-body {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.auto-name-modal-body > label {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.auto-name-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.auto-name-modal-actions button {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+
+.auto-name-modal-actions .is-primary {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel-2));
+  color: var(--accent);
+  font-weight: 800;
 }
 
 .modal-body {
@@ -2895,6 +2961,33 @@ select:focus {
 .save-metadata-import-copy small { color: var(--faint); font-family: var(--design-font-mono, ui-monospace); font-size: 8px; line-height: 1.4; overflow-wrap: anywhere; }
 .save-metadata-import-button { min-height: 34px; padding: 0 12px; border-color: color-mix(in srgb, var(--accent) 62%, var(--border)); color: var(--accent); font-size: 10px; font-weight: 800; }
 .save-metadata-import-button:disabled { cursor: not-allowed; opacity: 0.48; }
+
+.save-pasted-metadata {
+  display: grid;
+  gap: 9px;
+  padding: 12px 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--design-radius-md, 10px);
+  background: color-mix(in srgb, var(--panel-2) 54%, transparent);
+}
+
+.save-pasted-metadata textarea {
+  width: 100%;
+  min-height: 112px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  color: var(--text);
+  font-family: var(--design-font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.save-pasted-metadata .save-metadata-import-button {
+  justify-self: end;
+}
 
 .save-project-location {
   display: grid;

@@ -8,7 +8,7 @@
   A visual desktop autonomous builder for FIRST Robotics Competition teams.
 </p>
 
-Voyager lets an FRC team build an autonomous routine as a branching tree, draw and tune each path on a field, plan collision-free routes around measured obstacles, preview the robot's motion, save the complete workspace into a WPILib project, and publish the selected routine to the robot over NT4. This guide covers the Voyager 3.4.0 workflow.
+Voyager lets an FRC team build an autonomous routine as a branching tree, draw and tune each path on a field, plan collision-free routes around measured obstacles, preview the robot's motion, save the complete workspace into a WPILib project, and publish the selected routine to the robot over NT4. This guide covers the Voyager 3.4.1 workflow.
 
 ## Contents
 
@@ -36,8 +36,8 @@ Download Voyager from the repository's [GitHub Releases](https://github.com/Priy
 
 | Package | Best for |
 | --- | --- |
-| `Voyager Setup 3.4.0.exe` | Normal Windows installation |
-| `Voyager 3.4.0.exe` | Running Voyager without installing it |
+| `Voyager Setup 3.4.1.exe` | Normal Windows installation |
+| `Voyager 3.4.1.exe` | Running Voyager without installing it |
 
 The Windows packages are not digitally code-signed, so SmartScreen may show an **Unknown publisher** warning. Only run packages obtained from the official repository.
 
@@ -107,7 +107,7 @@ The **Live robot** tab displays the live NT4 robot pose, connection state, persi
 
 ### Path tree
 
-The path tree describes the order and branching structure of the routine. Drag nodes to arrange them and drag the canvas to pan. Double-click the canvas to reset its pan. Connection curves automatically attach to the nearest left, right, top, or bottom side center on each node, so links approach from outside rather than crossing through a node when children are arranged in another direction. A node selected for keyboard actions receives a selection outline; nodes belonging to the routine selected for publishing use the routine highlight.
+The path tree describes the order and branching structure of the routine. Drag nodes to arrange them and drag the canvas to pan. Double-click the canvas to reset its pan. Right-click a node to duplicate it with its connected child sequence, optionally reflecting every path across X or Y, or name the complete auto. Named autos appear by their first path block and are written to `auto_config.json`. Connection curves automatically attach to the nearest left, right, top, or bottom side center on each node, so links approach from outside rather than crossing through a node when children are arranged in another direction. A node selected for keyboard actions receives a selection outline; nodes belonging to the routine selected for publishing use the routine highlight.
 
 ## First-time configuration
 
@@ -361,6 +361,7 @@ Open **Save** in the top navigation. The screen-centered modal blurs the workspa
 - **Save metadata now** to write the complete workspace without exporting the path files.
 - **Save metadata automatically** to keep the project metadata synchronized independently of automatic path export.
 - **Publish selected auto on connect** to publish the selected routine whenever a robot connection is detected.
+- **Import metadata** to intentionally load the selected project's `metadata.json`, or paste its JSON contents to load that workspace and update the selected project's metadata file.
 
 Path names are converted to safe filenames. **Save all paths** also deletes stale generated path files that no longer correspond to a path-tree block. Voyager's editor state and preferences are additionally persisted locally between application sessions.
 
@@ -370,11 +371,13 @@ Every save also writes the portable workspace file:
 <robot-project>/src/main/deploy/voyager/assets/metadata.json
 ```
 
-This metadata contains the current settings, field image, obstacle map, paths, path tree, active selection, canvas position, generated-file inventory, and complete snapshot history. Selecting a robot project discovers its saved snapshots. Use **Load project metadata** in Version History when you intentionally want to replace the open workspace with the project copy.
+This metadata contains the current settings, field image, obstacle map, paths, path tree, active selection, canvas position, generated-file inventory, and complete snapshot history. Selecting a robot project no longer reads its metadata automatically. Use **Import metadata** or paste the JSON in the Save window when you intentionally want to replace the open workspace with the project copy.
 
 Generated files should normally be committed with the robot project so autonomous definitions are version-controlled beside the code that executes them.
 
 Open **More Tools** in the Auto maker toolbar and choose **Mirror X** or **Mirror Y** to reflect the selected path over that coordinate. Waypoint and rotation-target headings are mirrored too, while event and constraint positions remain on the same path positions.
+
+Right-click an Event Trigger, Event Zone handle, or Constraint Zone handle to open its property editor directly.
 
 ## Version history
 
@@ -466,7 +469,7 @@ The complete tree is written as:
 auto_config.json
 ```
 
-It contains each root autonomous routine and serializes its paths, events, true/false branches, loop bodies, interruptible sequences, and continuation chains.
+It contains each root autonomous routine with an `id`, an `autoname` nickname, and a `path_sequence` containing its paths, events, true/false branches, loop bodies, interruptible sequences, and continuation chains.
 
 ## Quick start checklist
 
@@ -518,8 +521,8 @@ npm run package:win
 
 ```text
 release/
-|-- Voyager Setup 3.4.0.exe
-`-- Voyager 3.4.0.exe
+|-- Voyager Setup 3.4.1.exe
+`-- Voyager 3.4.1.exe
 ```
 
 Before publishing a release, update the version in `package.json`, build both packages, smoke-test the packaged app, update the release notes, and attach the executables to a GitHub Release.

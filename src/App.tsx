@@ -249,6 +249,7 @@ interface BaseTreeNode {
   id: string;
   kind: TreeKind;
   name: string;
+  autoname?: string;
   x: number;
   y: number;
   parentId: string | null;
@@ -508,6 +509,7 @@ type SerializedAutoElement =
 interface SerializedAutoConfig {
   autos: Array<{
     id: string;
+    autoname: string;
     path_sequence: SerializedAutoElement[];
   }>;
 }
@@ -516,7 +518,7 @@ const DB_NAME = "voyager-autonomous-builder";
 const DB_VERSION = 1;
 const DB_STORE = "kv";
 const APP_STATE_KEY = "app-state";
-const VOYAGER_VERSION = "3.4.0";
+const VOYAGER_VERSION = "3.4.1";
 const PROJECT_METADATA_FILE = "metadata.json";
 const NODE_WIDTH = 160;
 const NODE_HEIGHT = 62;
@@ -1186,6 +1188,32 @@ function rootNodeFor(nodeId: string, nodes: PathTreeNode[]): PathTreeNode | null
   return current;
 }
 
+function firstPathNodeInRoutine(rootId: string, nodes: PathTreeNode[]): PathTreePathNode | null {
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const seen = new Set<string>();
+  const visit = (nodeId: string): PathTreePathNode | null => {
+    if (seen.has(nodeId)) return null;
+    seen.add(nodeId);
+    const node = nodeById.get(nodeId);
+    if (!node) return null;
+    if (node.kind === "path") return node;
+    const childIds = node.kind === "if"
+      ? [node.trueId, node.falseId, node.nextId]
+      : node.kind === "loop"
+        ? [node.forloopId, node.nextId]
+        : node.kind === "interrupt"
+          ? [node.interruptableId, node.nextId]
+          : [node.nextId];
+    for (const childId of childIds) {
+      if (!childId) continue;
+      const pathNode = visit(childId);
+      if (pathNode) return pathNode;
+    }
+    return null;
+  };
+  return visit(rootId);
+}
+
 function collectSubtreeNodeIds(rootId: string, nodes: PathTreeNode[]): Set<string> {
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const collected = new Set<string>();
@@ -1209,6 +1237,19 @@ function cloneSharedPathData(path: SharedPathData): SharedPathData {
     events: path.events.map((event) => ({ ...event, id: createId("event") })),
     eventZones: path.eventZones.map((zone) => ({ ...zone, id: createId("event_zone") })),
     constraintZones: path.constraintZones.map((zone) => ({ ...zone, id: createId("constraint") })),
+  };
+}
+
+function mirrorSharedPathData(path: SharedPathData, axis: "x" | "y", fieldLengthMeters: number, fieldWidthMeters: number): SharedPathData {
+  return {
+    ...path,
+    waypoints: path.waypoints.map((waypoint) => axis === "x"
+      ? { ...waypoint, x: fieldLengthMeters - waypoint.x, angle: normalizeCompassDegrees(180 - waypoint.angle) }
+      : { ...waypoint, y: fieldWidthMeters - waypoint.y, angle: normalizeCompassDegrees(-waypoint.angle) }),
+    rotationTargets: path.rotationTargets.map((target) => ({
+      ...target,
+      angle: normalizeCompassDegrees(axis === "x" ? 180 - target.angle : -target.angle),
+    })),
   };
 }
 
@@ -1255,6 +1296,7 @@ function instantiateTreeSnapshot(
   snapshot: TreeClipboardSnapshot,
   existingNodes: PathTreeNode[],
   offset: number,
+  mirror?: { axis: "x" | "y"; fieldLengthMeters: number; fieldWidthMeters: number },
 ): { nodes: PathTreeNode[]; pathDataByName: Record<string, SharedPathData>; rootId: string } {
   const idMap = new Map(snapshot.nodes.map((node) => [node.id, createId(node.kind)]));
   const usedNames = new Set(existingNodes.map((node) => node.name));
@@ -1265,6 +1307,7 @@ function instantiateTreeSnapshot(
       ...node,
       id: idMap.get(node.id)!,
       name,
+      autoname: "",
       x: node.x + offset,
       y: node.y + offset,
       parentId: node.parentId ? idMap.get(node.parentId) ?? null : null,
@@ -1276,7 +1319,12 @@ function instantiateTreeSnapshot(
       const childId = childIdForSlot(node, slot);
       copied = setChildForSlot(copied, slot, childId ? idMap.get(childId) ?? null : null);
     }
-    if (node.kind === "path") pathDataByName[name] = cloneSharedPathData(snapshot.pathDataByNodeId[node.id] ?? createEmptyPathData());
+    if (node.kind === "path") {
+      const pathData = cloneSharedPathData(snapshot.pathDataByNodeId[node.id] ?? createEmptyPathData());
+      pathDataByName[name] = mirror
+        ? mirrorSharedPathData(pathData, mirror.axis, mirror.fieldLengthMeters, mirror.fieldWidthMeters)
+        : pathData;
+    }
     return copied;
   });
   return { nodes: copiedNodes, pathDataByName, rootId: idMap.get(snapshot.rootId)! };
@@ -2174,6 +2222,7 @@ function serializeAutoConfig(nodes: PathTreeNode[]): SerializedAutoConfig {
   return {
     autos: roots.map((root) => ({
       id: routineCodeForRoot(root),
+      autoname: typeof root.autoname === "string" ? root.autoname.trim().slice(0, 120) : "",
       path_sequence: serializeChain(root.id),
     })),
   };
@@ -2346,6 +2395,7 @@ function normalizePersistedState(value: PersistedAppState | null): PersistedAppS
         id,
         kind: node.kind,
         name: typeof node.name === "string" && node.name.trim() ? node.name.trim().slice(0, 120) : defaultNameForKind(node.kind, []),
+        autoname: typeof node.autoname === "string" ? node.autoname.trim().slice(0, 120) : "",
         x: cleanNumber(Number(node.x), 120 + (index % 4) * 190),
         y: cleanNumber(Number(node.y), 90 + Math.floor(index / 4) * 100),
         selectedForRoutine: Boolean(node.selectedForRoutine),
@@ -3294,6 +3344,9 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [pendingConnection, setPendingConnection] = useState<PendingTreeConnection | null>(null);
   const [modal, setModal] = useState<ElementModalState>(null);
+  const [autoNameModal, setAutoNameModal] = useState<{ rootId: string; x: number; y: number } | null>(null);
+  const [autoNameDraft, setAutoNameDraft] = useState("");
+  const [metadataPasteText, setMetadataPasteText] = useState("");
   const [playbackOpen, setPlaybackOpen] = useState(false);
   const [playbackPlaying, setPlaybackPlaying] = useState(false);
   const [playbackTime, setPlaybackTime] = useState(0);
@@ -3326,6 +3379,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const historyCommitTimerRef = useRef<number | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const elementModalRef = useRef<HTMLDivElement>(null);
+  const autoNameModalRef = useRef<HTMLDivElement>(null);
   const settingsModalRef = useRef<HTMLDivElement>(null);
   const playbackModalRef = useRef<HTMLDivElement>(null);
   const playbackRobotRef = useRef<HTMLDivElement>(null);
@@ -3941,16 +3995,20 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     [pathDataByName, treeNodes],
   );
 
-  const insertTreeSnapshot = useCallback((snapshot: TreeClipboardSnapshot, message: string): void => {
+  const insertTreeSnapshot = useCallback((snapshot: TreeClipboardSnapshot, message: string, mirrorAxis?: "x" | "y"): void => {
     clipboardPasteCountRef.current += 1;
     const offset = 48 * clipboardPasteCountRef.current;
-    const instantiated = instantiateTreeSnapshot(snapshot, treeNodes, offset);
+    const instantiated = instantiateTreeSnapshot(snapshot, treeNodes, offset, mirrorAxis ? {
+      axis: mirrorAxis,
+      fieldLengthMeters: settings.fieldLengthMeters,
+      fieldWidthMeters: settings.fieldWidthMeters,
+    } : undefined);
     setTreeNodes((previous) => [...previous, ...instantiated.nodes]);
     setPathDataByName((previous) => ({ ...previous, ...instantiated.pathDataByName }));
     setSelectedTreeNodeId(instantiated.rootId);
     setContextMenu(null);
     setSaveStatus({ kind: "saved", message });
-  }, [treeNodes]);
+  }, [settings.fieldLengthMeters, settings.fieldWidthMeters, treeNodes]);
 
   const copySelectedTree = useCallback((): void => {
     if (!selectedTreeNodeId) {
@@ -3992,6 +4050,38 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     clipboardPasteCountRef.current = 0;
     insertTreeSnapshot(snapshot, "Duplicated the selected path-tree block without its children.");
   }, [insertTreeSnapshot, pathDataByName, selectedTreeNodeId, treeNodes]);
+
+  const duplicateTreeSubtree = useCallback((nodeId: string, mirrorAxis?: "x" | "y"): void => {
+    const snapshot = copyTreeSnapshot(nodeId, treeNodes, pathDataByName, true);
+    if (!snapshot) return;
+    clipboardPasteCountRef.current = 0;
+    const action = mirrorAxis ? `Duplicated and mirrored ${mirrorAxis.toUpperCase()}` : "Duplicated";
+    insertTreeSnapshot(snapshot, `${action} ${snapshot.nodes.length} path-tree block${snapshot.nodes.length === 1 ? "" : "s"}, including children.`, mirrorAxis);
+  }, [insertTreeSnapshot, pathDataByName, treeNodes]);
+
+  const openAutoNameModal = useCallback((nodeId: string): void => {
+    const root = rootNodeFor(nodeId, treeNodes);
+    if (!root) return;
+    const appRect = appRef.current?.getBoundingClientRect();
+    const maxX = appRect ? Math.max(8, appRect.width - 300) : 8;
+    const maxY = appRect ? Math.max(48, appRect.height - 160) : 48;
+    setAutoNameDraft(root.autoname ?? "");
+    setAutoNameModal({
+      rootId: root.id,
+      x: clamp((contextMenu?.x ?? 96) + 12, 8, maxX),
+      y: clamp((contextMenu?.y ?? 96) + 12, 48, maxY),
+    });
+    setContextMenu(null);
+  }, [contextMenu, treeNodes]);
+
+  const saveAutoName = useCallback((): void => {
+    if (!autoNameModal) return;
+    const autoname = autoNameDraft.trim().slice(0, 120);
+    const root = treeNodes.find((node) => node.id === autoNameModal.rootId);
+    setTreeNodes((previous) => previous.map((node) => node.id === autoNameModal.rootId ? { ...node, autoname } : node));
+    setAutoNameModal(null);
+    setSaveStatus({ kind: "saved", message: autoname ? `Named auto ${autoname}.` : `Cleared the name for ${root?.name ?? "this auto"}.` });
+  }, [autoNameDraft, autoNameModal, setSaveStatus, treeNodes]);
 
   useEffect(() => {
     const onTreeClipboardKeyDown = (event: KeyboardEvent): void => {
@@ -4497,6 +4587,19 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     };
   }, []);
 
+  const openElementModalFromContext = useCallback((
+    event: ReactMouseEvent<HTMLElement>,
+    kind: "eventTrigger" | "eventZone" | "constraintZone",
+    id: string,
+  ): void => {
+    event.preventDefault();
+    event.stopPropagation();
+    const position = modalPositionFromEvent(event);
+    if (kind === "eventTrigger") setModal({ kind, id, ...position });
+    else if (kind === "eventZone") setModal({ kind, id, ...position });
+    else setModal({ kind, id, ...position });
+  }, [modalPositionFromEvent]);
+
   const beginWaypointDrag = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>, waypoint: Waypoint): void => {
       event.preventDefault();
@@ -4659,6 +4762,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
   const beginPathPositionDrag = useCallback(
     (event: ReactPointerEvent<HTMLElement>, updatePosition: (position: number) => void): void => {
       event.stopPropagation();
+      if (event.button !== 0) return;
       if (fieldOneSize.width <= 0 || fieldOneSize.height <= 0 || activePathData.waypoints.length < 2) return;
       const fieldRect = fieldOneRef.current?.getBoundingClientRect();
       if (!fieldRect) return;
@@ -5076,6 +5180,48 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     };
   }, [modal]);
 
+  const beginAutoNameModalDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (!autoNameModal || (event.target as HTMLElement).closest("button, input")) return;
+    const appRect = appRef.current?.getBoundingClientRect();
+    const modalElement = autoNameModalRef.current;
+    if (!appRect || !modalElement) return;
+    event.preventDefault();
+    event.stopPropagation();
+    modalElement.classList.add("is-dragging");
+    const offset = {
+      x: event.clientX - appRect.left - autoNameModal.x,
+      y: event.clientY - appRect.top - autoNameModal.y,
+    };
+    let nextX = autoNameModal.x;
+    let nextY = autoNameModal.y;
+    const pointerFrame = createPointerFrameScheduler((clientX, clientY) => {
+      nextX = clamp(clientX - appRect.left - offset.x, 4, Math.max(4, appRect.width - modalElement.offsetWidth - 4));
+      nextY = clamp(clientY - appRect.top - offset.y, 44, Math.max(44, appRect.height - modalElement.offsetHeight - 4));
+      modalElement.style.transform = `translate3d(${nextX - autoNameModal.x}px, ${nextY - autoNameModal.y}px, 0)`;
+    });
+    const onPointerMove = (moveEvent: PointerEvent): void => pointerFrame.schedule(moveEvent.clientX, moveEvent.clientY);
+    const onPointerUp = (): void => {
+      pointerFrame.flush();
+      modalElement.style.left = `${nextX}px`;
+      modalElement.style.top = `${nextY}px`;
+      modalElement.style.transform = "";
+      modalElement.classList.remove("is-dragging");
+      setAutoNameModal((current) => current ? { ...current, x: nextX, y: nextY } : current);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      dragOperationRef.current = null;
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    dragOperationRef.current = () => {
+      pointerFrame.cancel();
+      modalElement.style.transform = "";
+      modalElement.classList.remove("is-dragging");
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+  }, [autoNameModal]);
+
   const togglePlaybackModal = useCallback((): void => {
     if (playbackOpen) {
       setPlaybackPlaying(false);
@@ -5151,23 +5297,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       const folder = await window.electronAPI.pickDirectory();
       if (!folder) return;
       updateSettings({ robotCodeProjectFolder: folder });
-      const metadataText = await window.electronAPI.readTextFile(getVoyagerAssetsFolder(folder), PROJECT_METADATA_FILE);
-      if (metadataText) {
-        const metadata = normalizePersistedState(JSON.parse(metadataText) as PersistedAppState);
-        if (metadata) {
-          setVersionHistory((current) => {
-            const merged = [...current, ...(metadata.versionHistory ?? [])]
-              .filter((snapshot, index, all) => all.findIndex((candidate) => candidate.id === snapshot.id) === index)
-              .sort((left, right) => left.timestamp - right.timestamp)
-              .slice(-VERSION_HISTORY_LIMIT);
-            versionHistoryRef.current = merged;
-            return merged;
-          });
-          setSaveStatus({ kind: "saved", message: `Selected robot project and found ${(metadata.versionHistory ?? []).length} project snapshot${(metadata.versionHistory ?? []).length === 1 ? "" : "s"}.` });
-          return;
-        }
-      }
-      setSaveStatus({ kind: "saved", message: "Selected robot project. Project metadata will be created on the next save." });
+      setSaveStatus({ kind: "saved", message: "Selected robot project. Import its metadata from the Save window when you are ready." });
     } catch (error) {
       console.error(error);
       setError("Could not select a robot code project folder.");
@@ -5240,6 +5370,59 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
       setError(error instanceof Error ? error.message : "Could not load project metadata.");
     }
   }, [setError, settings.robotCodeProjectFolder]);
+
+  const importPastedProjectMetadata = useCallback(async (): Promise<void> => {
+    const selectedFolder = settings.robotCodeProjectFolder;
+    const pastedText = metadataPasteText.trim();
+    if (!selectedFolder || !window.electronAPI) {
+      setError("Select a robot code project before importing pasted metadata.");
+      return;
+    }
+    if (!pastedText) {
+      setError("Paste the contents of metadata.json before importing it.");
+      return;
+    }
+    try {
+      const parsed: unknown = JSON.parse(pastedText);
+      const pastedState = parsed as Partial<PersistedAppState> | null;
+      if (!pastedState || typeof pastedState !== "object"
+        || !Array.isArray(pastedState.treeNodes)
+        || !pastedState.settings || typeof pastedState.settings !== "object"
+        || !pastedState.pathDataByName || typeof pastedState.pathDataByName !== "object" || Array.isArray(pastedState.pathDataByName)) {
+        throw new Error("The pasted file must be a Voyager metadata.json workspace export.");
+      }
+      const projectState = normalizePersistedState(pastedState as PersistedAppState);
+      if (!projectState) throw new Error("The pasted metadata file is not valid Voyager metadata.");
+
+      const folder = getVoyagerAssetsFolder(selectedFolder);
+      if (window.electronAPI.makeDirectory) await window.electronAPI.makeDirectory(folder);
+      const updatedMetadata = {
+        ...pastedState,
+        voyagerVersion: VOYAGER_VERSION,
+        savedAt: Date.now(),
+      };
+      await window.electronAPI.writeTextFile(folder, PROJECT_METADATA_FILE, `${JSON.stringify(updatedMetadata, null, 2)}\n`);
+
+      setSettings({ ...projectState.settings, robotCodeProjectFolder: selectedFolder });
+      setTreeNodes(projectState.treeNodes);
+      setPathDataByName(projectState.pathDataByName);
+      setKnownPathFileNames(projectState.knownPathFileNames ?? []);
+      setActivePathNodeId(projectState.activePathNodeId);
+      setPan(projectState.pan);
+      setObstacles(projectState.obstacles ?? []);
+      setActivityLog((projectState.activityLog ?? []).slice(-ACTIVITY_LOG_LIMIT));
+      setSelectedTreeNodeId(projectState.selectedTreeNodeId ?? null);
+      if (projectState.treeModalRect) setTreeModalRect(projectState.treeModalRect);
+      setTreeModalMinimized(Boolean(projectState.treeModalMinimized));
+      if (projectState.playbackModalPosition) setPlaybackModalPosition(projectState.playbackModalPosition);
+      setVersionHistory(projectState.versionHistory ?? []);
+      versionHistoryRef.current = projectState.versionHistory ?? [];
+      setVersionHistoryOpen(false);
+      setSaveStatus({ kind: "saved", message: "Imported pasted metadata.json and updated the selected robot project." });
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not import pasted metadata.");
+    }
+  }, [metadataPasteText, setError, settings.robotCodeProjectFolder]);
 
   const deleteTextFile = useCallback(async (fileName: string): Promise<void> => {
     if (!settings.robotCodeProjectFolder) throw new Error("Select a robot code project before deleting old path files.");
@@ -5656,7 +5839,11 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
     );
   }), [showEdgeMenu, treeEdges]);
 
-  const treeNodeElements = useMemo(() => treeNodes.map((node) => (
+  const treeNodeElements = useMemo(() => treeNodes.map((node) => {
+    const routineRoot = rootNodeFor(node.id, treeNodes);
+    const firstPath = routineRoot ? firstPathNodeInRoutine(routineRoot.id, treeNodes) : null;
+    const autoName = routineRoot?.autoname?.trim();
+    return (
     <div
       key={node.id}
       data-tree-node-id={node.id}
@@ -5692,6 +5879,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
         if (node.kind === "path") activatePathNode(node.id);
       }}
     >
+      {node.kind === "path" && firstPath?.id === node.id && autoName ? <span className="tree-auto-name-label">{autoName}</span> : null}
       {renamingNodeId === node.id ? (
         <input
           className="rename-input"
@@ -5715,7 +5903,8 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
         </>
       )}
     </div>
-  )), [activatePathNode, beginNodeDrag, commitRename, renameDraft, renamingNodeId, selectedTreeNodeId, showNodeMenu, startRename, treeNodes]);
+    );
+  }), [activatePathNode, beginNodeDrag, commitRename, renameDraft, renamingNodeId, selectedTreeNodeId, showNodeMenu, startRename, treeNodes]);
 
   const activeWaypointModal = modal?.kind === "waypoint" ? activePathData.waypoints.find((waypoint) => waypoint.id === modal.id) ?? null : null;
   const activeRotationTargetModal = modal?.kind === "rotationTarget" ? activePathData.rotationTargets.find((target) => target.id === modal.id) ?? null : null;
@@ -6070,6 +6259,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                       const pos = modalPositionFromEvent(event);
                       setModal({ kind: "eventTrigger", id: eventTrigger.id, x: pos.x, y: pos.y });
                     }}
+                    onContextMenu={(event) => openElementModalFromContext(event, "eventTrigger", eventTrigger.id)}
                   />
                 );
               })}
@@ -6094,6 +6284,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                         const pos = modalPositionFromEvent(event);
                         setModal({ kind: "eventZone", id: zone.id, x: pos.x, y: pos.y });
                       }}
+                      onContextMenu={(event) => openElementModalFromContext(event, "eventZone", zone.id)}
                     >S</button>
                     <button
                       className="event-zone-handle event-zone-handle-end"
@@ -6107,6 +6298,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                         const pos = modalPositionFromEvent(event);
                         setModal({ kind: "eventZone", id: zone.id, x: pos.x, y: pos.y });
                       }}
+                      onContextMenu={(event) => openElementModalFromContext(event, "eventZone", zone.id)}
                     >E</button>
                   </React.Fragment>
                 );
@@ -6131,6 +6323,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                         const pos = modalPositionFromEvent(event);
                         setModal({ kind: "constraintZone", id: zone.id, x: pos.x, y: pos.y });
                       }}
+                      onContextMenu={(event) => openElementModalFromContext(event, "constraintZone", zone.id)}
                     />
                     <button
                       className="constraint-handle constraint-handle-end"
@@ -6143,6 +6336,7 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                         const pos = modalPositionFromEvent(event);
                         setModal({ kind: "constraintZone", id: zone.id, x: pos.x, y: pos.y });
                       }}
+                      onContextMenu={(event) => openElementModalFromContext(event, "constraintZone", zone.id)}
                     />
                   </React.Fragment>
                 );
@@ -6366,6 +6560,27 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
                 onClick={() => void importProjectMetadata()}
               >
                 Import metadata
+              </button>
+            </section>
+            <section className="save-pasted-metadata" aria-label="Import pasted metadata.json">
+              <div className="save-metadata-import-copy">
+                <strong>Import from pasted metadata.json</strong>
+                <span>Paste a Voyager metadata file to load its workspace and replace metadata.json in the selected robot project.</span>
+              </div>
+              <textarea
+                aria-label="Pasted metadata.json contents"
+                placeholder="Paste the full contents of metadata.json here…"
+                value={metadataPasteText}
+                onChange={(event) => setMetadataPasteText(event.target.value)}
+                spellCheck={false}
+              />
+              <button
+                type="button"
+                className="save-metadata-import-button"
+                disabled={!settings.robotCodeProjectFolder || !metadataPasteText.trim()}
+                onClick={() => void importPastedProjectMetadata()}
+              >
+                Import pasted metadata
               </button>
             </section>
             <section className="save-options" aria-label="Automatic save and publish options">
@@ -6776,8 +6991,14 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
             );
             const directChildren = getNodeChildren(node);
             const nodeParentConnection = getParentConnection(treeNodes, node.id);
+            const routineRoot = rootNodeFor(node.id, treeNodes);
             return (
               <>
+                <div className="menu-section-label">Autonomous routine</div>
+                <button type="button" onClick={() => duplicateTreeSubtree(node.id)}>Duplicate</button>
+                <button type="button" onClick={() => duplicateTreeSubtree(node.id, "x")}>Duplicate with mirror X</button>
+                <button type="button" onClick={() => duplicateTreeSubtree(node.id, "y")}>Duplicate with mirror Y</button>
+                <button type="button" onClick={() => openAutoNameModal(node.id)}>{routineRoot?.autoname ? "Rename Auto" : "Name Auto"}</button>
                 <div className="menu-section-label">Relationships</div>
                 <button type="button" disabled={!nodeParentConnection} onClick={() => removeNodeParent(node.id)}>Remove parent</button>
                 <button type="button" disabled={directChildren.length === 0} onClick={() => removeNodeChildren(node.id)}>Remove child</button>
@@ -7280,6 +7501,52 @@ function App({ nt4Address, setNt4Address }: AppProps): ReactElement {
               <button className="danger full-button" type="button" onClick={() => deleteConstraintZone(activeConstraintZoneModal.id)}>Delete constraint zone</button>
             </div>
           ) : null}
+        </div>
+      ) : null}
+
+      {autoNameModal ? (
+        <div
+          ref={autoNameModalRef}
+          className="auto-name-modal"
+          role="dialog"
+          aria-label="Name autonomous routine"
+          tabIndex={-1}
+          style={{ left: `${autoNameModal.x}px`, top: `${autoNameModal.y}px` }}
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setAutoNameModal(null);
+            } else if (event.key === "Enter") {
+              event.preventDefault();
+              saveAutoName();
+            }
+          }}
+        >
+          <div className="modal-titlebar draggable" onPointerDown={beginAutoNameModalDrag}>
+            <div>
+              <strong>Name Auto</strong>
+              <span>{treeNodes.find((node) => node.id === autoNameModal.rootId)?.name ?? "Autonomous routine"}</span>
+            </div>
+            <button type="button" aria-label="Close name auto modal" onClick={() => setAutoNameModal(null)}>×</button>
+          </div>
+          <div className="auto-name-modal-body">
+            <label htmlFor="auto-name-input">Auto nickname</label>
+            <input
+              id="auto-name-input"
+              type="text"
+              maxLength={120}
+              autoFocus
+              placeholder="e.g. Center Start"
+              value={autoNameDraft}
+              onChange={(event) => setAutoNameDraft(event.target.value)}
+              onPointerDown={(event) => event.stopPropagation()}
+            />
+            <div className="auto-name-modal-actions">
+              <button type="button" onClick={() => setAutoNameModal(null)}>Cancel</button>
+              <button type="button" className="is-primary" onClick={saveAutoName}>Save name</button>
+            </div>
+          </div>
         </div>
       ) : null}
     </div>
