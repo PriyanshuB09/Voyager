@@ -2855,6 +2855,7 @@ select:focus {
 .save-dialog {
   width: min(720px, calc(100vw - 24px)) !important;
   max-width: min(720px, calc(100vw - 24px)) !important;
+  height: min(88vh, 720px);
   max-height: min(88vh, 720px);
   grid-template-rows: auto minmax(0, 1fr);
   gap: 0 !important;
@@ -2897,6 +2898,23 @@ select:focus {
   min-height: 0;
   padding: var(--design-panel-padding, 16px);
   overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+}
+
+.save-dialog-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.save-dialog-body::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--border-strong);
+  background-clip: padding-box;
+}
+
+.save-dialog-body::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .save-action-grid {
@@ -3223,6 +3241,7 @@ select:focus {
 }
 
 @media (max-width: 520px) {
+  .save-dialog { height: calc(100vh - 12px); }
   .save-dialog,
   .preferences-dialog,
   .obstacle-dialog,
